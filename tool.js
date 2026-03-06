@@ -14,18 +14,15 @@ function ga() {
 }
 
 var BASE = 'https://disneyworld.disney.go.com';
-var isAndroid = navigator.userAgent.toLowerCase().includes('android');
 
 async function api(path, body) {
   var a = ga();
   if (!a) return { ok: false, status: 0, data: 'Not logged in' };
   var headers = {
-    'Accept': '*/*',
     'Accept-Language': 'en-US',
     'Authorization': 'BEARER ' + a.j,
     'Content-Type': 'application/json',
-    'x-user-id': a.w,
-    'x-app-id': isAndroid ? 'ANDROID' : 'IOS'
+    'x-user-id': a.w
   };
   try {
     var r = await fetch(BASE + path, {
@@ -203,7 +200,7 @@ tb.appendChild(btn('Load Tip Board', async function() {
   try {
     var r = await fetch(url, {
       method: 'GET',
-      headers: { 'Accept': '*/*', 'Accept-Language': 'en-US', 'Authorization': 'BEARER ' + a.j, 'x-user-id': a.w, 'x-app-id': isAndroid ? 'ANDROID' : 'IOS' },
+      headers: { 'Accept-Language': 'en-US', 'Authorization': 'BEARER ' + a.j, 'x-user-id': a.w },
       referrer: '', credentials: 'omit', cache: 'no-store'
     });
     var txt = await r.text(); var d; try { d = JSON.parse(txt); } catch(e) { d = txt; }
@@ -218,7 +215,7 @@ tb.appendChild(btn('Load Tip Board', async function() {
       var meta = document.createElement('div'); meta.className = 'exp-meta';
       var sb = e.standby || {};
       if (sb.waitTime != null) { var w = document.createElement('span'); w.className='wait'; w.textContent = sb.waitTime+'m wait'; meta.appendChild(w); }
-      if (e.flex && e.flex.available) { var ll = document.createElement('span'); ll.className='ll'; ll.textContent='⚡ '+(e.flex.nextAvailableTime||'avail'); meta.appendChild(ll); }
+      if (e.flex && e.flex.available) { var ll = document.createElement('span'); ll.className='ll'; var t=e.flex.nextAvailableTime;if(t){var p=t.split(':');var h=+p[0];var ampm=h>=12?'pm':'am';h=h%12||12;ll.textContent='⚡ '+h+':'+p[1]+ampm;}else{ll.textContent='⚡ avail';} meta.appendChild(ll); }
       if (e.individual && e.individual.available) { var ip = document.createElement('span'); ip.className='price'; ip.textContent='💲 '+(e.individual.nextAvailableTime||'avail'); meta.appendChild(ip); }
       div.appendChild(meta);
       // Book button prefills offers tab
