@@ -1,6 +1,8 @@
 (function() {
 
-function ga() {
+// ── Auth ──────────────────────────────────────────────────────────────────────
+// Gets the web idtoken + SWID from cookies
+function getWebAuth() {
   var t = document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('TPR-WDW-LBJS.WEB-PROD.token=');});
   if (!t) return null;
   try {
@@ -9,8 +11,95 @@ function ga() {
     if (!jwt || !jwt.startsWith('eyJ')) return null;
     var s = document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('SWID=');});
     var swid = s ? s.split('=').slice(1).join('=') : '';
-    return { j: jwt, w: swid };
+    return { idToken: jwt, swid: swid };
   } catch(e) { return null; }
+}
+
+// Cache for the exchanged guest JWT
+var _guestJwt = null;
+var _guestJwtExpiry = 0;
+
+// Exchange the web idtoken for a proper guest JWT (cat:guest, client_id:TPR-WDW-LBSDK.AND-PROD)
+// This is the same exchange bg1 does before hitting ea-vas endpoints
+async function getGuestJwt() {
+  var now = Date.now();
+  if (_guestJwt && now < _guestJwtExpiry) return _guestJwt;
+
+  var wa = getWebAuth();
+  if (!wa) return null;
+
+  try {
+    var r = await fetch('https://disneyworld.disney.go.com/guest/login', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US',
+        'Content-Type': 'application/json;charset=UTF-8',
+        'Authorization': 'BEARER ' + wa.idToken,
+        'x-user-id': wa.swid,
+        'x-requested-with': 'XMLHttpRequest'
+      },
+      body: JSON.stringify({
+        loginValue: wa.swid,
+        token: wa.idToken
+      }),
+      credentials: 'include',
+      cache: 'no-store'
+    });
+
+    if (r.ok) {
+      var d = await r.json();
+      var jwt = d.token || d.access_token || d.accessToken;
+      if (jwt) {
+        // Parse expiry from JWT payload
+        try {
+          var payload = JSON.parse(atob(jwt.split('.')[1]));
+          _guestJwtExpiry = (payload.exp || 0) * 1000 - 60000; // 1 min buffer
+        } catch(e) {
+          _guestJwtExpiry = now + 3600000; // default 1hr
+        }
+        _guestJwt = jwt;
+        console.log('[LL Tool] Guest JWT obtained via /guest/login');
+        return _guestJwt;
+      }
+    }
+  } catch(e) {
+    console.warn('[LL Tool] /guest/login failed:', e);
+  }
+
+  // Fallback: try the oneid token exchange endpoint bg1 uses
+  try {
+    var r2 = await fetch('https://disneyworld.disney.go.com/login', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'x-requested-with': 'XMLHttpRequest'
+      },
+      body: 'access_token=' + encodeURIComponent(wa.idToken) + '&client_id=TPR-WDW-LBSDK.AND-PROD',
+      credentials: 'include',
+      cache: 'no-store'
+    });
+    if (r2.ok) {
+      var d2 = await r2.json();
+      var jwt2 = d2.token || d2.access_token || d2.accessToken;
+      if (jwt2) {
+        _guestJwt = jwt2;
+        _guestJwtExpiry = Date.now() + 3600000;
+        console.log('[LL Tool] Guest JWT obtained via /login fallback');
+        return _guestJwt;
+      }
+    }
+  } catch(e2) {
+    console.warn('[LL Tool] /login fallback failed:', e2);
+  }
+
+  // Last resort: return the web idtoken as-is and hope it works
+  console.warn('[LL Tool] Could not exchange for guest JWT, using idToken directly');
+  _guestJwt = wa.idToken;
+  _guestJwtExpiry = Date.now() + 300000; // retry in 5 min
+  return _guestJwt;
 }
 
 var BASE = 'https://disneyworld.disney.go.com';
@@ -21,27 +110,39 @@ async function getSensorData() {
     var r = await fetch(SENSOR_URL, { cache: 'no-store' });
     if (!r.ok) return '';
     var d = await r.json();
-    return d.sensor_data || d['x-acf-sensor-data'] || '';
+    return d.sensor_data || d['x-acf-sensor-data'] || d.data || '';
   } catch(e) {
     console.warn('sensor-data fetch failed:', e);
     return '';
   }
 }
 
+// Main API call — uses guest JWT + sensor data, matching bg1's working request exactly
 async function api(path, body) {
-  var a = ga();
-  if (!a) return { ok: false, status: 0, data: 'Not logged in' };
-  var sensor = await getSensorData();
+  var wa = getWebAuth();
+  if (!wa) return { ok: false, status: 0, data: 'Not logged in — no auth cookies found' };
+
+  var [jwt, sensor] = await Promise.all([getGuestJwt(), getSensorData()]);
+  if (!jwt) return { ok: false, status: 0, data: 'Could not obtain guest JWT' };
+
   var headers = {
     'Accept': '*/*',
     'Accept-Language': 'en-US',
-    'Authorization': 'BEARER ' + a.j,
+    'Authorization': 'BEARER ' + jwt,
     'Content-Type': 'application/json',
-    'x-user-id': a.w,
+    'x-user-id': wa.swid,
     'x-app-id': 'ANDROID',
-    'Origin': 'https://disneyworld.disney.go.com'
+    'Origin': BASE,
+    'sec-ch-ua': '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+    'sec-ch-ua-mobile': '?1',
+    'sec-ch-ua-platform': '"Android"',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Mobile Safari/537.36'
   };
   if (sensor) headers['x-acf-sensor-data'] = sensor;
+
   try {
     var r = await fetch(BASE + path, {
       method: 'POST',
@@ -131,6 +232,7 @@ st.textContent = [
   '.ok{background:rgba(46,213,115,.15);color:#2ed573;border:1px solid #2ed57333}',
   '.no{background:rgba(255,71,87,.15);color:#ff4757;border:1px solid #ff475733}',
   '.info{background:rgba(0,212,255,.1);color:#00d4ff;border:1px solid #00d4ff33}',
+  '.warn{background:rgba(255,209,102,.1);color:#ffd166;border:1px solid #ffd16633}',
   '#tabs{display:flex;background:#0d0d1a;border-bottom:1px solid #1e1e2e;position:sticky;top:45px;z-index:10}',
   '.tab{flex:1;padding:10px 4px;background:none;border:none;border-bottom:2px solid transparent;color:#555;font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;font-family:monospace}',
   '.tab.on{color:#00d4ff;border-bottom-color:#00d4ff}',
@@ -158,20 +260,42 @@ st.textContent = [
 ].join('');
 document.head.appendChild(st);
 
-var auth = ga();
+var webAuth = getWebAuth();
 
 // ── Header ────────────────────────────────────────────────────────────────────
 var hd = document.createElement('div'); hd.id = 'hd';
 var h1el = document.createElement('h1'); h1el.textContent = '⚡ LL Tool'; hd.appendChild(h1el);
 var authBadge = document.createElement('span');
-authBadge.className = 'badge ' + (auth ? 'ok' : 'no');
-authBadge.textContent = auth ? '✓ ' + auth.w.slice(0,8) + '...' : '✗ not logged in';
+authBadge.className = 'badge ' + (webAuth ? 'warn' : 'no');
+authBadge.textContent = webAuth ? '⟳ authing...' : '✗ not logged in';
 hd.appendChild(authBadge);
 var namesBadge = document.createElement('span');
 namesBadge.className = 'badge info';
 namesBadge.textContent = '⟳ names';
 hd.appendChild(namesBadge);
 document.body.appendChild(hd);
+
+// Kick off JWT exchange and name loading in parallel
+if (webAuth) {
+  getGuestJwt().then(function(jwt) {
+    if (jwt && jwt !== webAuth.idToken) {
+      // Successfully exchanged for guest JWT
+      try {
+        var payload = JSON.parse(atob(jwt.split('.')[1]));
+        var cat = payload.cat || payload.client_id || 'guest';
+        authBadge.textContent = '✓ ' + cat + ' ' + webAuth.swid.slice(0,8) + '...';
+        authBadge.className = 'badge ok';
+      } catch(e) {
+        authBadge.textContent = '✓ authed ' + webAuth.swid.slice(0,8) + '...';
+        authBadge.className = 'badge ok';
+      }
+    } else {
+      // Using idtoken directly — warn user
+      authBadge.textContent = '⚠ idtoken (may fail)';
+      authBadge.className = 'badge warn';
+    }
+  });
+}
 
 loadAttractionNames().then(function() {
   var count = Object.keys(DYNAMIC_NAMES).length;
@@ -196,7 +320,6 @@ var panes = {};
     document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});
     b.classList.add('on');
     panes[id].classList.add('on');
-    // Show sticky load button only on tipboard tab
     stickyBar.className = id === 'tipboard' ? 'vis' : '';
   };
   tabBar.appendChild(b);
@@ -252,13 +375,20 @@ async function doLoadTipBoard() {
   var pk = document.getElementById('tb-park').value;
   var dt = document.getElementById('tb-date').value;
   var llOnly = document.getElementById('tb-ll-only').checked;
-  var a = ga();
-  if (!a) { showRes('tb-res', {ok:false,status:0,data:'Not logged in'}); return; }
-  var url = BASE + '/tipboard-vas/planning/v1/parks/' + pk + '/experiences/?date=' + dt + '&userId=' + encodeURIComponent(a.w);
+  var wa = getWebAuth();
+  if (!wa) { showRes('tb-res', {ok:false,status:0,data:'Not logged in'}); return; }
+  var jwt = await getGuestJwt();
+  var url = BASE + '/tipboard-vas/planning/v1/parks/' + pk + '/experiences/?date=' + dt + '&userId=' + encodeURIComponent(wa.swid);
   try {
     var r = await fetch(url, {
       method: 'GET',
-      headers: { 'Accept-Language': 'en-US', 'Authorization': 'BEARER ' + a.j, 'x-user-id': a.w },
+      headers: {
+        'Accept': '*/*',
+        'Accept-Language': 'en-US',
+        'Authorization': 'BEARER ' + jwt,
+        'x-user-id': wa.swid,
+        'x-app-id': 'ANDROID'
+      },
       referrer: '', credentials: 'omit', cache: 'no-store'
     });
     var txt = await r.text(); var d; try { d = JSON.parse(txt); } catch(e) { d = txt; }
@@ -315,25 +445,19 @@ async function doLoadTipBoard() {
 var tb = panes.tipboard;
 tb.appendChild(lbl('Park'));
 tb.appendChild(parkSelect('tb-park'));
-
 var tbRow = document.createElement('div'); tbRow.className = 'row';
 var tbDateWrap = document.createElement('div');
 tbDateWrap.appendChild(lbl('Date'));
 var tbDate = inp('tb-date'); tbDate.type = 'date'; tbDate.value = today;
 tbDateWrap.appendChild(tbDate); tbRow.appendChild(tbDateWrap);
 tb.appendChild(tbRow);
-
-// LL-only filter toggle
 var filterRow = document.createElement('label'); filterRow.className = 'filter-row';
 var filterCb = document.createElement('input'); filterCb.type = 'checkbox'; filterCb.id = 'tb-ll-only';
 var filterSpan = document.createElement('span'); filterSpan.textContent = 'Lightning Lane only';
-filterRow.appendChild(filterCb);
-filterRow.appendChild(filterSpan);
+filterRow.appendChild(filterCb); filterRow.appendChild(filterSpan);
 tb.appendChild(filterRow);
-
 tb.appendChild(resDiv('tb-res'));
 
-// ── Sticky Load Button (fixed to bottom, shown only on tipboard tab) ──────────
 var stickyBar = document.createElement('div'); stickyBar.id = 'tb-sticky'; stickyBar.className = 'vis';
 stickyBar.appendChild(mkbtn('Load Tip Board', doLoadTipBoard));
 document.body.appendChild(stickyBar);
@@ -392,7 +516,6 @@ of.appendChild(mkbtn('Generate Offer', async function() {
   var expId = document.getElementById('off-exp').value.trim();
   var pk = document.getElementById('off-park').value;
   var rawTime = document.getElementById('off-time').value.trim() || '08:00';
-  // Ensure HH:MM:SS format
   var tt = rawTime.length === 5 ? rawTime + ':00' : rawTime;
   var gids = document.getElementById('off-guests').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
   if (!gids.length && window._guestIds && window._guestIds.length) gids = window._guestIds;
