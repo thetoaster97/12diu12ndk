@@ -8,7 +8,7 @@ function ga() {
     var jwt = raw.split('|').pop();
     if (!jwt || !jwt.startsWith('eyJ')) return null;
     var s = document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('SWID=');});
-    var swid = s ? s.split('=').slice(1).join('=').replace(/[{}]/g, '') : '';
+    var swid = s ? s.split('=').slice(1).join('=') : '';
     return { j: jwt, w: swid };
   } catch(e) { return null; }
 }
