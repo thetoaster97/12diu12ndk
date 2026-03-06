@@ -104,15 +104,16 @@ st.textContent = [
   '.sec{font-size:.55rem;color:#555;text-transform:uppercase;letter-spacing:.12em;margin:12px 0 6px}',
   '.inelig{opacity:.45}'
 ].join('');
+// Toggle
+var existing = document.getElementById('_llt_wrap');
+if (existing) { existing.remove(); return; }
+
+document.head.appendChild(st);
+
 var wrap = document.createElement('div');
 wrap.id = '_llt_wrap';
 wrap.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;overflow-y:auto;background:#08080e';
 document.body.appendChild(wrap);
-document.head.appendChild(st);
-
-// Remove existing overlay if present (toggle)
-var existing = document.getElementById('_llt_wrap');
-if (existing) { existing.remove(); return; }
 
 var auth = ga();
 
@@ -121,7 +122,7 @@ var hd = document.createElement('div'); hd.id = 'hd';
 var h1 = document.createElement('h1'); h1.textContent = '⚡ LL Tool'; hd.appendChild(h1);
 var badge = document.createElement('span');
 badge.className = 'badge ' + (auth ? 'ok' : 'no');
-badge.textContent = auth ? '✓ ' + auth.w.slice(0,8) + '...' : '✗ not logged in';
+badge.textContent = auth ? '✓ logged in' : '✗ not logged in';
 hd.appendChild(badge);
 wrap.appendChild(hd);
 
@@ -129,7 +130,7 @@ wrap.appendChild(hd);
 var tabBar = document.createElement('div'); tabBar.id = 'tabs';
 var bodyDiv = document.createElement('div'); bodyDiv.id = 'body';
 wrap.appendChild(tabBar);
-document.body.appendChild(bodyDiv);
+wrap.appendChild(bodyDiv);
 
 var panes = {};
 ['tipboard','guests','offers'].forEach(function(id, i) {
