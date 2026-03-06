@@ -18,10 +18,13 @@ var BASE = 'https://disneyworld.disney.go.com';
 async function api(path, body) {
   var a = ga();
   if (!a) return { ok: false, status: 0, data: 'Not logged in' };
+  var isAndroid = navigator.userAgent.toLowerCase().includes('android');
   var headers = {
+    'Accept': '*/*',
     'Accept-Language': 'en-US',
     'Authorization': 'BEARER ' + a.j,
     'Content-Type': 'application/json',
+    'x-app-id': isAndroid ? 'ANDROID' : 'IOS',
     'x-user-id': a.w
   };
   try {
@@ -30,7 +33,7 @@ async function api(path, body) {
       headers: headers,
       body: JSON.stringify(body),
       referrer: '',
-      credentials: 'omit',
+      credentials: 'include',
       cache: 'no-store'
     });
     var txt = await r.text();
@@ -70,9 +73,7 @@ function nm(id) { return NAMES[+id] || id; }
 
 // ── Build page ──────────────────────────────────────────────────────────────
 
-document.open();
-document.write('<!DOCTYPE html><html><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>LL Tool</title></head><body></body></html>');
-document.close();
+// overlay mode - keep disney page intact so Akamai sensor cookies stay
 
 var st = document.createElement('style');
 st.textContent = [
@@ -103,7 +104,15 @@ st.textContent = [
   '.sec{font-size:.55rem;color:#555;text-transform:uppercase;letter-spacing:.12em;margin:12px 0 6px}',
   '.inelig{opacity:.45}'
 ].join('');
+var wrap = document.createElement('div');
+wrap.id = '_llt_wrap';
+wrap.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;overflow-y:auto;background:#08080e';
+document.body.appendChild(wrap);
 document.head.appendChild(st);
+
+// Remove existing overlay if present (toggle)
+var existing = document.getElementById('_llt_wrap');
+if (existing) { existing.remove(); return; }
 
 var auth = ga();
 
@@ -114,12 +123,12 @@ var badge = document.createElement('span');
 badge.className = 'badge ' + (auth ? 'ok' : 'no');
 badge.textContent = auth ? '✓ ' + auth.w.slice(0,8) + '...' : '✗ not logged in';
 hd.appendChild(badge);
-document.body.appendChild(hd);
+wrap.appendChild(hd);
 
 // Tabs
 var tabBar = document.createElement('div'); tabBar.id = 'tabs';
 var bodyDiv = document.createElement('div'); bodyDiv.id = 'body';
-document.body.appendChild(tabBar);
+wrap.appendChild(tabBar);
 document.body.appendChild(bodyDiv);
 
 var panes = {};
@@ -200,8 +209,8 @@ tb.appendChild(btn('Load Tip Board', async function() {
   try {
     var r = await fetch(url, {
       method: 'GET',
-      headers: { 'Accept-Language': 'en-US', 'Authorization': 'BEARER ' + a.j, 'x-user-id': a.w },
-      referrer: '', credentials: 'omit', cache: 'no-store'
+      headers: { 'Accept': '*/*', 'Accept-Language': 'en-US', 'Authorization': 'BEARER ' + a.j, 'x-app-id': isAndroid ? 'ANDROID' : 'IOS', 'x-user-id': a.w },
+      referrer: '', credentials: 'include', cache: 'no-store'
     });
     var txt = await r.text(); var d; try { d = JSON.parse(txt); } catch(e) { d = txt; }
     if (r.status !== 200) { showRes('tb-res', {ok:false,status:r.status,data:d}); return; }
