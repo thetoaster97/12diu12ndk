@@ -199,7 +199,7 @@ tb.appendChild(btn('Load Tip Board', async function() {
   var a = ga();
   if (!a) { showRes('tb-res', {ok:false,status:0,data:'Not logged in'}); return; }
   // Tip board is GET with params
-  var url = BASE + '/tipboard-vas/planning/v1/parks/' + pk + '/experiences/?date=' + dt + '&userId=' + a.w;
+  var url = BASE + '/tipboard-vas/planning/v1/parks/' + pk + '/experiences/?date=' + dt + '&userId=' + encodeURIComponent(a.w);
   try {
     var r = await fetch(url, {
       method: 'GET',
