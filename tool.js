@@ -14,16 +14,34 @@ function ga() {
 }
 
 var BASE = 'https://disneyworld.disney.go.com';
+var SENSOR_URL = 'https://bg1.joelface.com/sensor-data/random';
+
+async function getSensorData() {
+  try {
+    var r = await fetch(SENSOR_URL, { cache: 'no-store' });
+    if (!r.ok) return '';
+    var d = await r.json();
+    return d.sensor_data || d['x-acf-sensor-data'] || '';
+  } catch(e) {
+    console.warn('sensor-data fetch failed:', e);
+    return '';
+  }
+}
 
 async function api(path, body) {
   var a = ga();
   if (!a) return { ok: false, status: 0, data: 'Not logged in' };
+  var sensor = await getSensorData();
   var headers = {
+    'Accept': '*/*',
     'Accept-Language': 'en-US',
     'Authorization': 'BEARER ' + a.j,
     'Content-Type': 'application/json',
-    'x-user-id': a.w
+    'x-user-id': a.w,
+    'x-app-id': 'ANDROID',
+    'Origin': 'https://disneyworld.disney.go.com'
   };
+  if (sensor) headers['x-acf-sensor-data'] = sensor;
   try {
     var r = await fetch(BASE + path, {
       method: 'POST',
@@ -50,7 +68,6 @@ var PARKS = [
   ['80007823', 'Animal Kingdom']
 ];
 
-// Static fallback names (used until dynamic lookup completes)
 var NAMES = {
   80010107:'Astro Orbiter',16491297:'Barnstormer',80010110:'Big Thunder Mountain',
   80010114:"Buzz Lightyear",80010208:'Haunted Mansion',80010149:"It's a Small World",
@@ -68,7 +85,6 @@ var NAMES = {
   80010154:'Kali River Rapids',80010157:'Kilimanjaro Safaris',18665185:"Na'vi River Journey"
 };
 
-// Dynamic name cache — populated from finder API
 var DYNAMIC_NAMES = {};
 var namesLoaded = false;
 
@@ -85,19 +101,13 @@ async function loadAttractionNames() {
     });
     if (!r.ok) return;
     var d = await r.json();
-    var results = d.results || [];
-    results.forEach(function(item) {
-      // id format: "80010176;entityType=Attraction"
+    (d.results || []).forEach(function(item) {
       var raw = item.id || item.facilityId || '';
       var numId = parseInt(raw.toString().split(';')[0], 10);
-      if (numId && item.name) {
-        DYNAMIC_NAMES[numId] = item.name;
-      }
+      if (numId && item.name) DYNAMIC_NAMES[numId] = item.name;
     });
     namesLoaded = true;
-  } catch(e) {
-    console.warn('Could not load attraction names:', e);
-  }
+  } catch(e) { console.warn('Could not load attraction names:', e); }
 }
 
 function nm(id) {
@@ -105,7 +115,7 @@ function nm(id) {
   return DYNAMIC_NAMES[numId] || NAMES[numId] || String(id);
 }
 
-// ── Build page ──────────────────────────────────────────────────────────────
+// ── Build page ───────────────────────────────────────────────────────────────
 
 document.open();
 document.write('<!DOCTYPE html><html><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>LL Tool</title></head><body></body></html>');
@@ -115,64 +125,61 @@ var st = document.createElement('style');
 st.textContent = [
   '*{box-sizing:border-box;margin:0;padding:0}',
   'body{background:#08080e;color:#ddd;font-family:monospace;min-height:100vh}',
-  '#hd{display:flex;align-items:center;gap:8px;padding:12px 16px;background:#0d0d1a;border-bottom:1px solid #1e1e2e;position:sticky;top:0;z-index:10}',
-  '#hd h1{color:#00d4ff;font-size:.7rem;letter-spacing:.2em;text-transform:uppercase;flex:1}',
-  '.badge{font-size:.6rem;padding:2px 8px;border-radius:8px}',
+  '#hd{display:flex;align-items:center;gap:8px;padding:10px 14px;background:#0d0d1a;border-bottom:1px solid #1e1e2e;position:sticky;top:0;z-index:10;flex-wrap:wrap}',
+  '#hd h1{color:#00d4ff;font-size:.7rem;letter-spacing:.2em;text-transform:uppercase;flex:1;min-width:80px}',
+  '.badge{font-size:.6rem;padding:2px 8px;border-radius:8px;white-space:nowrap}',
   '.ok{background:rgba(46,213,115,.15);color:#2ed573;border:1px solid #2ed57333}',
   '.no{background:rgba(255,71,87,.15);color:#ff4757;border:1px solid #ff475733}',
   '.info{background:rgba(0,212,255,.1);color:#00d4ff;border:1px solid #00d4ff33}',
   '#tabs{display:flex;background:#0d0d1a;border-bottom:1px solid #1e1e2e;position:sticky;top:45px;z-index:10}',
   '.tab{flex:1;padding:10px 4px;background:none;border:none;border-bottom:2px solid transparent;color:#555;font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;font-family:monospace}',
   '.tab.on{color:#00d4ff;border-bottom-color:#00d4ff}',
-  '#body{padding:16px}',
+  '#body{padding:16px 16px 80px}',
   '.pane{display:none}.pane.on{display:block}',
   'label{display:block;font-size:.6rem;color:#555;text-transform:uppercase;letter-spacing:.1em;margin:12px 0 4px}',
   'label:first-child{margin-top:0}',
-  'select,input{width:100%;background:#0e0e1c;border:1px solid #2a2a3a;border-radius:6px;color:#e8e8f0;padding:11px 12px;font-family:monospace;font-size:14px;outline:none}',
-  'button.btn{width:100%;margin-top:14px;padding:13px;border-radius:6px;border:1px solid #00d4ff33;background:rgba(0,212,255,.1);color:#00d4ff;cursor:pointer;font-family:monospace;font-size:14px;font-weight:bold}',
+  'select,input[type=date],input[type=text],input[type=time]{width:100%;background:#0e0e1c;border:1px solid #2a2a3a;border-radius:6px;color:#e8e8f0;padding:11px 12px;font-family:monospace;font-size:14px;outline:none}',
+  'button.btn{width:100%;padding:13px;border-radius:6px;border:1px solid #00d4ff33;background:rgba(0,212,255,.1);color:#00d4ff;cursor:pointer;font-family:monospace;font-size:14px;font-weight:bold}',
+  '#tb-sticky{position:fixed;bottom:0;left:0;right:0;padding:10px 16px 14px;background:linear-gradient(transparent,#08080e 35%);z-index:20;display:none}',
+  '#tb-sticky.vis{display:block}',
   '.res{margin-top:14px;background:#050510;border:1px solid #1e1e2e;border-radius:6px;padding:12px;font-size:12px;white-space:pre-wrap;word-break:break-all;line-height:1.7;min-height:40px}',
   '.row{display:flex;gap:8px}.row>*{flex:1}',
   '.exp{padding:10px;background:#0d0d1a;border:1px solid #1e1e2e;border-radius:6px;margin-bottom:8px}',
   '.exp-name{font-size:13px;margin-bottom:4px}',
-  '.exp-meta{display:flex;gap:10px;font-size:11px;color:#555}',
+  '.exp-meta{display:flex;gap:10px;font-size:11px;color:#555;flex-wrap:wrap}',
   '.ll{color:#00d4ff}.wait{color:#888}.price{color:#ffd166}',
   '.guest{padding:8px 10px;background:#0d0d1a;border:1px solid #1e1e2e;border-radius:6px;margin-bottom:6px;font-size:13px}',
   '.guest-id{font-size:10px;color:#555;word-break:break-all;margin-top:2px}',
   '.sec{font-size:.55rem;color:#555;text-transform:uppercase;letter-spacing:.12em;margin:12px 0 6px}',
   '.inelig{opacity:.45}',
-  '.names-status{font-size:.55rem;padding:4px 8px;border-radius:4px;margin-left:4px}'
+  '.filter-row{display:flex;align-items:center;gap:8px;margin:10px 0 6px;cursor:pointer}',
+  '.filter-row input[type=checkbox]{width:15px;height:15px;accent-color:#00d4ff;cursor:pointer;flex-shrink:0}',
+  '.filter-row span{font-size:.65rem;color:#888;text-transform:uppercase;letter-spacing:.1em}'
 ].join('');
 document.head.appendChild(st);
 
 var auth = ga();
 
-// Header
+// ── Header ────────────────────────────────────────────────────────────────────
 var hd = document.createElement('div'); hd.id = 'hd';
-var h1 = document.createElement('h1'); h1.textContent = '⚡ LL Tool'; hd.appendChild(h1);
-var badge = document.createElement('span');
-badge.className = 'badge ' + (auth ? 'ok' : 'no');
-badge.textContent = auth ? '✓ ' + auth.w.slice(0,8) + '...' : '✗ not logged in';
-hd.appendChild(badge);
-// Names status indicator
+var h1el = document.createElement('h1'); h1el.textContent = '⚡ LL Tool'; hd.appendChild(h1el);
+var authBadge = document.createElement('span');
+authBadge.className = 'badge ' + (auth ? 'ok' : 'no');
+authBadge.textContent = auth ? '✓ ' + auth.w.slice(0,8) + '...' : '✗ not logged in';
+hd.appendChild(authBadge);
 var namesBadge = document.createElement('span');
-namesBadge.className = 'badge info names-status';
+namesBadge.className = 'badge info';
 namesBadge.textContent = '⟳ names';
 hd.appendChild(namesBadge);
 document.body.appendChild(hd);
 
-// Kick off name loading immediately and update badge
 loadAttractionNames().then(function() {
   var count = Object.keys(DYNAMIC_NAMES).length;
-  if (count > 0) {
-    namesBadge.textContent = '✓ ' + count + ' rides';
-    namesBadge.className = 'badge ok names-status';
-  } else {
-    namesBadge.textContent = '✗ names';
-    namesBadge.className = 'badge no names-status';
-  }
+  namesBadge.textContent = count > 0 ? '✓ ' + count + ' rides' : '✗ names';
+  namesBadge.className = 'badge ' + (count > 0 ? 'ok' : 'no');
 });
 
-// Tabs
+// ── Tabs ──────────────────────────────────────────────────────────────────────
 var tabBar = document.createElement('div'); tabBar.id = 'tabs';
 var bodyDiv = document.createElement('div'); bodyDiv.id = 'body';
 document.body.appendChild(tabBar);
@@ -181,16 +188,18 @@ document.body.appendChild(bodyDiv);
 var panes = {};
 ['tipboard','guests','offers'].forEach(function(id, i) {
   var labels = ['Tip Board','Guests','Offers'];
-  var btn = document.createElement('button');
-  btn.className = 'tab' + (i === 0 ? ' on' : '');
-  btn.textContent = labels[i];
-  btn.onclick = function() {
+  var b = document.createElement('button');
+  b.className = 'tab' + (i === 0 ? ' on' : '');
+  b.textContent = labels[i];
+  b.onclick = function() {
     document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('on');});
     document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});
-    btn.classList.add('on');
+    b.classList.add('on');
     panes[id].classList.add('on');
+    // Show sticky load button only on tipboard tab
+    stickyBar.className = id === 'tipboard' ? 'vis' : '';
   };
-  tabBar.appendChild(btn);
+  tabBar.appendChild(b);
   var pane = document.createElement('div');
   pane.className = 'pane' + (i === 0 ? ' on' : '');
   pane.id = 'pane-' + id;
@@ -198,7 +207,7 @@ var panes = {};
   bodyDiv.appendChild(pane);
 });
 
-// ── Helper to build park select ─────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function parkSelect(id, selectedIdx) {
   var s = document.createElement('select'); s.id = id;
   PARKS.forEach(function(p, i) {
@@ -209,13 +218,15 @@ function parkSelect(id, selectedIdx) {
   });
   return s;
 }
-function lbl(txt) {
-  var l = document.createElement('label'); l.textContent = txt; return l;
+function lbl(txt, forId) {
+  var l = document.createElement('label'); l.textContent = txt;
+  if (forId) l.htmlFor = forId;
+  return l;
 }
 function inp(id, ph) {
   var i = document.createElement('input'); i.id = id; i.placeholder = ph||''; return i;
 }
-function btn(txt, fn) {
+function mkbtn(txt, fn) {
   var b = document.createElement('button'); b.className = 'btn'; b.textContent = txt; b.onclick = fn; return b;
 }
 function resDiv(id) {
@@ -235,22 +246,12 @@ function loading(id) {
   el.textContent = 'Loading...';
 }
 
-// ── Tip Board ───────────────────────────────────────────────────────────────
-var tb = panes.tipboard;
-tb.appendChild(lbl('Park'));
-tb.appendChild(parkSelect('tb-park'));
-var tbRow = document.createElement('div'); tbRow.className = 'row';
-var tbDateWrap = document.createElement('div');
-tbDateWrap.appendChild(lbl('Date'));
-var tbDate = inp('tb-date'); tbDate.type = 'date'; tbDate.value = today;
-tbDateWrap.appendChild(tbDate); tbRow.appendChild(tbDateWrap);
-tb.appendChild(tbRow);
-tb.appendChild(btn('Load Tip Board', async function() {
+async function doLoadTipBoard() {
   loading('tb-res');
-  // Ensure names are loaded before rendering
   await loadAttractionNames();
   var pk = document.getElementById('tb-park').value;
   var dt = document.getElementById('tb-date').value;
+  var llOnly = document.getElementById('tb-ll-only').checked;
   var a = ga();
   if (!a) { showRes('tb-res', {ok:false,status:0,data:'Not logged in'}); return; }
   var url = BASE + '/tipboard-vas/planning/v1/parks/' + pk + '/experiences/?date=' + dt + '&userId=' + encodeURIComponent(a.w);
@@ -263,45 +264,87 @@ tb.appendChild(btn('Load Tip Board', async function() {
     var txt = await r.text(); var d; try { d = JSON.parse(txt); } catch(e) { d = txt; }
     if (r.status !== 200) { showRes('tb-res', {ok:false,status:r.status,data:d}); return; }
     var exps = (d.availableExperiences || []);
+    if (llOnly) {
+      exps = exps.filter(function(e) {
+        return (e.flex && e.flex.available) || (e.individual && e.individual.available);
+      });
+    }
     var el = document.getElementById('tb-res');
     el.style.display = 'block'; el.style.color = '#ddd'; el.textContent = '';
-    if (!exps.length) { el.textContent = 'No experiences found.'; return; }
+    if (!exps.length) { el.textContent = llOnly ? 'No LL times available right now.' : 'No experiences found.'; return; }
     exps.forEach(function(e) {
       var div = document.createElement('div'); div.className = 'exp';
       var name = document.createElement('div'); name.className = 'exp-name';
-      // Use dynamic name lookup — falls back to static map then raw id
       name.textContent = nm(e.id);
       div.appendChild(name);
       var meta = document.createElement('div'); meta.className = 'exp-meta';
       var sb = e.standby || {};
       if (sb.waitTime != null) { var w = document.createElement('span'); w.className='wait'; w.textContent = sb.waitTime+'m wait'; meta.appendChild(w); }
-      if (e.flex && e.flex.available) { var ll = document.createElement('span'); ll.className='ll'; var t=e.flex.nextAvailableTime;if(t){var p=t.split(':');var h=+p[0];var ampm=h>=12?'pm':'am';h=h%12||12;ll.textContent='⚡ '+h+':'+p[1]+ampm;}else{ll.textContent='⚡ avail';} meta.appendChild(ll); }
-      if (e.individual && e.individual.available) { var ip = document.createElement('span'); ip.className='price'; ip.textContent='💲 '+(e.individual.nextAvailableTime||'avail'); meta.appendChild(ip); }
+      if (e.flex && e.flex.available) {
+        var ll = document.createElement('span'); ll.className='ll';
+        var t = e.flex.nextAvailableTime;
+        if (t) { var pts=t.split(':');var h=+pts[0];var ampm=h>=12?'pm':'am';h=h%12||12; ll.textContent='⚡ '+h+':'+pts[1]+ampm; }
+        else { ll.textContent='⚡ avail'; }
+        meta.appendChild(ll);
+      }
+      if (e.individual && e.individual.available) {
+        var ip = document.createElement('span'); ip.className='price';
+        ip.textContent='💲 '+(e.individual.nextAvailableTime||'avail');
+        meta.appendChild(ip);
+      }
       div.appendChild(meta);
       if ((e.flex && e.flex.available) || (e.individual && e.individual.available)) {
         var bb = document.createElement('button');
         bb.style.cssText = 'margin-top:6px;padding:6px 12px;border-radius:4px;border:1px solid #00d4ff33;background:rgba(0,212,255,.1);color:#00d4ff;cursor:pointer;font-family:monospace;font-size:11px';
         bb.textContent = 'Book →';
-        bb.onclick = function() {
-          document.getElementById('off-exp').value = e.id;
-          document.getElementById('off-park').value = pk;
-          document.querySelectorAll('.tab')[2].click();
-        };
+        bb.onclick = (function(expId, parkId) {
+          return function() {
+            document.getElementById('off-exp').value = expId;
+            document.getElementById('off-park').value = parkId;
+            document.querySelectorAll('.tab')[2].click();
+          };
+        })(e.id, pk);
         div.appendChild(bb);
       }
       el.appendChild(div);
     });
   } catch(ex) { showRes('tb-res', {ok:false,status:0,data:ex.message}); }
-}));
+}
+
+// ── Tip Board ─────────────────────────────────────────────────────────────────
+var tb = panes.tipboard;
+tb.appendChild(lbl('Park'));
+tb.appendChild(parkSelect('tb-park'));
+
+var tbRow = document.createElement('div'); tbRow.className = 'row';
+var tbDateWrap = document.createElement('div');
+tbDateWrap.appendChild(lbl('Date'));
+var tbDate = inp('tb-date'); tbDate.type = 'date'; tbDate.value = today;
+tbDateWrap.appendChild(tbDate); tbRow.appendChild(tbDateWrap);
+tb.appendChild(tbRow);
+
+// LL-only filter toggle
+var filterRow = document.createElement('label'); filterRow.className = 'filter-row';
+var filterCb = document.createElement('input'); filterCb.type = 'checkbox'; filterCb.id = 'tb-ll-only';
+var filterSpan = document.createElement('span'); filterSpan.textContent = 'Lightning Lane only';
+filterRow.appendChild(filterCb);
+filterRow.appendChild(filterSpan);
+tb.appendChild(filterRow);
+
 tb.appendChild(resDiv('tb-res'));
 
-// ── Guests ───────────────────────────────────────────────────────────────────
+// ── Sticky Load Button (fixed to bottom, shown only on tipboard tab) ──────────
+var stickyBar = document.createElement('div'); stickyBar.id = 'tb-sticky'; stickyBar.className = 'vis';
+stickyBar.appendChild(mkbtn('Load Tip Board', doLoadTipBoard));
+document.body.appendChild(stickyBar);
+
+// ── Guests ────────────────────────────────────────────────────────────────────
 var gu = panes.guests;
 gu.appendChild(lbl('Park'));
 gu.appendChild(parkSelect('gu-park'));
 gu.appendChild(lbl('Facility ID (optional)'));
 gu.appendChild(inp('gu-fid', 'e.g. 80010176'));
-gu.appendChild(btn('Fetch Guests', async function() {
+gu.appendChild(mkbtn('Fetch Guests', async function() {
   loading('gu-res');
   var r = await api('/ea-vas/planning/api/v1/experiences/guest/guests', {
     date: today,
@@ -318,8 +361,8 @@ gu.appendChild(btn('Fetch Guests', async function() {
     g.forEach(function(guest) {
       var d = document.createElement('div'); d.className='guest';
       d.textContent = guest.firstName + ' ' + guest.lastName + (guest.primary ? ' ★' : '');
-      var id = document.createElement('div'); id.className='guest-id'; id.textContent = guest.id;
-      d.appendChild(id); el.appendChild(d);
+      var gid = document.createElement('div'); gid.className='guest-id'; gid.textContent = guest.id;
+      d.appendChild(gid); el.appendChild(d);
     });
   }
   if (ig.length) {
@@ -334,21 +377,23 @@ gu.appendChild(btn('Fetch Guests', async function() {
 }));
 gu.appendChild(resDiv('gu-res'));
 
-// ── Offers ───────────────────────────────────────────────────────────────────
+// ── Offers ────────────────────────────────────────────────────────────────────
 var of = panes.offers;
 of.appendChild(lbl('Experience ID'));
 of.appendChild(inp('off-exp', 'e.g. 80010176'));
 of.appendChild(lbl('Park'));
 of.appendChild(parkSelect('off-park'));
 of.appendChild(lbl('Targeted Time'));
-var offTime = inp('off-time'); offTime.value = '08:00:00'; of.appendChild(offTime);
+var offTime = inp('off-time'); offTime.type = 'time'; offTime.value = '08:00'; of.appendChild(offTime);
 of.appendChild(lbl('Guest IDs (auto-filled from Guests tab)'));
 of.appendChild(inp('off-guests', 'comma separated, or fetch guests first'));
-of.appendChild(btn('Generate Offer', async function() {
+of.appendChild(mkbtn('Generate Offer', async function() {
   loading('off-res');
   var expId = document.getElementById('off-exp').value.trim();
   var pk = document.getElementById('off-park').value;
-  var tt = document.getElementById('off-time').value.trim() || '08:00:00';
+  var rawTime = document.getElementById('off-time').value.trim() || '08:00';
+  // Ensure HH:MM:SS format
+  var tt = rawTime.length === 5 ? rawTime + ':00' : rawTime;
   var gids = document.getElementById('off-guests').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
   if (!gids.length && window._guestIds && window._guestIds.length) gids = window._guestIds;
   if (!expId) { showRes('off-res', {ok:false,status:0,data:'Enter an experience ID'}); return; }
