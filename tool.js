@@ -1,4 +1,17 @@
-@@ -14,196 +14,193 @@
+@@ -1,312 +1,309 @@
+(function() {
+
+function ga() {
+  var t = document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('TPR-WDW-LBJS.WEB-PROD.token=');});
+  if (!t) return null;
+  try {
+    var raw = decodeURIComponent(t.split('=').slice(1).join('='));
+    var jwt = raw.split('|').pop();
+    if (!jwt || !jwt.startsWith('eyJ')) return null;
+    var s = document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('SWID=');});
+    var swid = s ? s.split('=').slice(1).join('=') : '';
+    return { j: jwt, w: swid };
+  } catch(e) { return null; }
 }
 
 var BASE = 'https://disneyworld.disney.go.com';
@@ -197,7 +210,14 @@ tb.appendChild(btn('Load Tip Board', async function() {
       referrer: '', credentials: 'omit', cache: 'no-store'
     });
     var txt = await r.text(); var d; try { d = JSON.parse(txt); } catch(e) { d = txt; }
-@@ -218,95 +215,95 @@
+    if (r.status !== 200) { showRes('tb-res', {ok:false,status:r.status,data:d}); return; }
+    var exps = (d.availableExperiences || []);
+    var el = document.getElementById('tb-res');
+    el.style.display = 'block'; el.style.color = '#ddd'; el.textContent = '';
+    if (!exps.length) { el.textContent = 'No experiences found.'; return; }
+    exps.forEach(function(e) {
+      var div = document.createElement('div'); div.className = 'exp';
+      var name = document.createElement('div'); name.className = 'exp-name'; name.textContent = nm(e.id); div.appendChild(name);
       var meta = document.createElement('div'); meta.className = 'exp-meta';
       var sb = e.standby || {};
       if (sb.waitTime != null) { var w = document.createElement('span'); w.className='wait'; w.textContent = sb.waitTime+'m wait'; meta.appendChild(w); }
@@ -293,5 +313,3 @@ of.appendChild(btn('Generate Offer', async function() {
   showRes('off-res', r);
 }));
 of.appendChild(resDiv('off-res'));
-
-})();
