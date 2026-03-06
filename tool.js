@@ -50,6 +50,7 @@ var PARKS = [
   ['80007823', 'Animal Kingdom']
 ];
 
+// Static fallback names (used until dynamic lookup completes)
 var NAMES = {
   80010107:'Astro Orbiter',16491297:'Barnstormer',80010110:'Big Thunder Mountain',
   80010114:"Buzz Lightyear",80010208:'Haunted Mansion',80010149:"It's a Small World",
@@ -66,7 +67,43 @@ var NAMES = {
   18665186:'Avatar Flight of Passage',80010123:'DINOSAUR',26068:'Expedition Everest',
   80010154:'Kali River Rapids',80010157:'Kilimanjaro Safaris',18665185:"Na'vi River Journey"
 };
-function nm(id) { return NAMES[+id] || id; }
+
+// Dynamic name cache — populated from finder API
+var DYNAMIC_NAMES = {};
+var namesLoaded = false;
+
+async function loadAttractionNames() {
+  if (namesLoaded) return;
+  try {
+    var url = BASE + '/finder/api/v1/explorer-service/list-ancestor-entities/wdw/80007798;entityType=destination/' + today + '/attractions';
+    var r = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept-Language': 'en-US' },
+      referrer: '',
+      credentials: 'omit',
+      cache: 'no-store'
+    });
+    if (!r.ok) return;
+    var d = await r.json();
+    var results = d.results || [];
+    results.forEach(function(item) {
+      // id format: "80010176;entityType=Attraction"
+      var raw = item.id || item.facilityId || '';
+      var numId = parseInt(raw.toString().split(';')[0], 10);
+      if (numId && item.name) {
+        DYNAMIC_NAMES[numId] = item.name;
+      }
+    });
+    namesLoaded = true;
+  } catch(e) {
+    console.warn('Could not load attraction names:', e);
+  }
+}
+
+function nm(id) {
+  var numId = +id;
+  return DYNAMIC_NAMES[numId] || NAMES[numId] || String(id);
+}
 
 // ── Build page ──────────────────────────────────────────────────────────────
 
@@ -83,6 +120,7 @@ st.textContent = [
   '.badge{font-size:.6rem;padding:2px 8px;border-radius:8px}',
   '.ok{background:rgba(46,213,115,.15);color:#2ed573;border:1px solid #2ed57333}',
   '.no{background:rgba(255,71,87,.15);color:#ff4757;border:1px solid #ff475733}',
+  '.info{background:rgba(0,212,255,.1);color:#00d4ff;border:1px solid #00d4ff33}',
   '#tabs{display:flex;background:#0d0d1a;border-bottom:1px solid #1e1e2e;position:sticky;top:45px;z-index:10}',
   '.tab{flex:1;padding:10px 4px;background:none;border:none;border-bottom:2px solid transparent;color:#555;font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;font-family:monospace}',
   '.tab.on{color:#00d4ff;border-bottom-color:#00d4ff}',
@@ -101,7 +139,8 @@ st.textContent = [
   '.guest{padding:8px 10px;background:#0d0d1a;border:1px solid #1e1e2e;border-radius:6px;margin-bottom:6px;font-size:13px}',
   '.guest-id{font-size:10px;color:#555;word-break:break-all;margin-top:2px}',
   '.sec{font-size:.55rem;color:#555;text-transform:uppercase;letter-spacing:.12em;margin:12px 0 6px}',
-  '.inelig{opacity:.45}'
+  '.inelig{opacity:.45}',
+  '.names-status{font-size:.55rem;padding:4px 8px;border-radius:4px;margin-left:4px}'
 ].join('');
 document.head.appendChild(st);
 
@@ -114,7 +153,24 @@ var badge = document.createElement('span');
 badge.className = 'badge ' + (auth ? 'ok' : 'no');
 badge.textContent = auth ? '✓ ' + auth.w.slice(0,8) + '...' : '✗ not logged in';
 hd.appendChild(badge);
+// Names status indicator
+var namesBadge = document.createElement('span');
+namesBadge.className = 'badge info names-status';
+namesBadge.textContent = '⟳ names';
+hd.appendChild(namesBadge);
 document.body.appendChild(hd);
+
+// Kick off name loading immediately and update badge
+loadAttractionNames().then(function() {
+  var count = Object.keys(DYNAMIC_NAMES).length;
+  if (count > 0) {
+    namesBadge.textContent = '✓ ' + count + ' rides';
+    namesBadge.className = 'badge ok names-status';
+  } else {
+    namesBadge.textContent = '✗ names';
+    namesBadge.className = 'badge no names-status';
+  }
+});
 
 // Tabs
 var tabBar = document.createElement('div'); tabBar.id = 'tabs';
@@ -191,11 +247,12 @@ tbDateWrap.appendChild(tbDate); tbRow.appendChild(tbDateWrap);
 tb.appendChild(tbRow);
 tb.appendChild(btn('Load Tip Board', async function() {
   loading('tb-res');
+  // Ensure names are loaded before rendering
+  await loadAttractionNames();
   var pk = document.getElementById('tb-park').value;
   var dt = document.getElementById('tb-date').value;
   var a = ga();
   if (!a) { showRes('tb-res', {ok:false,status:0,data:'Not logged in'}); return; }
-  // Tip board is GET with params
   var url = BASE + '/tipboard-vas/planning/v1/parks/' + pk + '/experiences/?date=' + dt + '&userId=' + encodeURIComponent(a.w);
   try {
     var r = await fetch(url, {
@@ -211,14 +268,16 @@ tb.appendChild(btn('Load Tip Board', async function() {
     if (!exps.length) { el.textContent = 'No experiences found.'; return; }
     exps.forEach(function(e) {
       var div = document.createElement('div'); div.className = 'exp';
-      var name = document.createElement('div'); name.className = 'exp-name'; name.textContent = nm(e.id); div.appendChild(name);
+      var name = document.createElement('div'); name.className = 'exp-name';
+      // Use dynamic name lookup — falls back to static map then raw id
+      name.textContent = nm(e.id);
+      div.appendChild(name);
       var meta = document.createElement('div'); meta.className = 'exp-meta';
       var sb = e.standby || {};
       if (sb.waitTime != null) { var w = document.createElement('span'); w.className='wait'; w.textContent = sb.waitTime+'m wait'; meta.appendChild(w); }
       if (e.flex && e.flex.available) { var ll = document.createElement('span'); ll.className='ll'; var t=e.flex.nextAvailableTime;if(t){var p=t.split(':');var h=+p[0];var ampm=h>=12?'pm':'am';h=h%12||12;ll.textContent='⚡ '+h+':'+p[1]+ampm;}else{ll.textContent='⚡ avail';} meta.appendChild(ll); }
       if (e.individual && e.individual.available) { var ip = document.createElement('span'); ip.className='price'; ip.textContent='💲 '+(e.individual.nextAvailableTime||'avail'); meta.appendChild(ip); }
       div.appendChild(meta);
-      // Book button prefills offers tab
       if ((e.flex && e.flex.available) || (e.individual && e.individual.available)) {
         var bb = document.createElement('button');
         bb.style.cssText = 'margin-top:6px;padding:6px 12px;border-radius:4px;border:1px solid #00d4ff33;background:rgba(0,212,255,.1);color:#00d4ff;cursor:pointer;font-family:monospace;font-size:11px';
@@ -253,7 +312,6 @@ gu.appendChild(btn('Fetch Guests', async function() {
   el.style.display = 'block'; el.style.color = '#ddd'; el.textContent = '';
   if (!r.ok) { showRes('gu-res', r); return; }
   var g = r.data.guests || [], ig = r.data.ineligibleGuests || [];
-  // store guest ids for offers tab
   window._guestIds = g.map(function(x){return x.id;});
   if (g.length) {
     var s = document.createElement('div'); s.className='sec'; s.textContent='Eligible ('+g.length+')'; el.appendChild(s);
