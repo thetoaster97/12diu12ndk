@@ -1,30 +1,19 @@
-(function() {
-
-function ga() {
-  var t = document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('TPR-WDW-LBJS.WEB-PROD.token=');});
-  if (!t) return null;
-  try {
-    var raw = decodeURIComponent(t.split('=').slice(1).join('='));
-    var jwt = raw.split('|').pop();
-    if (!jwt || !jwt.startsWith('eyJ')) return null;
-    var s = document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('SWID=');});
-    var swid = s ? s.split('=').slice(1).join('=') : '';
-    return { j: jwt, w: swid };
-  } catch(e) { return null; }
+@@ -14,196 +14,193 @@
 }
 
 var BASE = 'https://disneyworld.disney.go.com';
+var isAndroid = navigator.userAgent.toLowerCase().includes('android');
 
 async function api(path, body) {
   var a = ga();
   if (!a) return { ok: false, status: 0, data: 'Not logged in' };
-  var isAndroid = navigator.userAgent.toLowerCase().includes('android');
   var headers = {
     'Accept': '*/*',
     'Accept-Language': 'en-US',
     'Authorization': 'BEARER ' + a.j,
     'Content-Type': 'application/json',
-    'x-app-id': isAndroid ? 'ANDROID' : 'IOS',
+    'x-user-id': a.w,
+    'x-app-id': isAndroid ? 'ANDROID' : 'IOS'
     'x-user-id': a.w
   };
   try {
@@ -33,7 +22,7 @@ async function api(path, body) {
       headers: headers,
       body: JSON.stringify(body),
       referrer: '',
-      credentials: 'include',
+      credentials: 'omit',
       cache: 'no-store'
     });
     var txt = await r.text();
@@ -73,7 +62,9 @@ function nm(id) { return NAMES[+id] || id; }
 
 // ── Build page ──────────────────────────────────────────────────────────────
 
-// overlay mode - keep disney page intact so Akamai sensor cookies stay
+document.open();
+document.write('<!DOCTYPE html><html><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>LL Tool</title></head><body></body></html>');
+document.close();
 
 var st = document.createElement('style');
 st.textContent = [
@@ -104,16 +95,7 @@ st.textContent = [
   '.sec{font-size:.55rem;color:#555;text-transform:uppercase;letter-spacing:.12em;margin:12px 0 6px}',
   '.inelig{opacity:.45}'
 ].join('');
-// Toggle
-var existing = document.getElementById('_llt_wrap');
-if (existing) { existing.remove(); return; }
-
 document.head.appendChild(st);
-
-var wrap = document.createElement('div');
-wrap.id = '_llt_wrap';
-wrap.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;overflow-y:auto;background:#08080e';
-document.body.appendChild(wrap);
 
 var auth = ga();
 
@@ -122,15 +104,15 @@ var hd = document.createElement('div'); hd.id = 'hd';
 var h1 = document.createElement('h1'); h1.textContent = '⚡ LL Tool'; hd.appendChild(h1);
 var badge = document.createElement('span');
 badge.className = 'badge ' + (auth ? 'ok' : 'no');
-badge.textContent = auth ? '✓ logged in' : '✗ not logged in';
+badge.textContent = auth ? '✓ ' + auth.w.slice(0,8) + '...' : '✗ not logged in';
 hd.appendChild(badge);
-wrap.appendChild(hd);
+document.body.appendChild(hd);
 
 // Tabs
 var tabBar = document.createElement('div'); tabBar.id = 'tabs';
 var bodyDiv = document.createElement('div'); bodyDiv.id = 'body';
-wrap.appendChild(tabBar);
-wrap.appendChild(bodyDiv);
+document.body.appendChild(tabBar);
+document.body.appendChild(bodyDiv);
 
 var panes = {};
 ['tipboard','guests','offers'].forEach(function(id, i) {
@@ -210,21 +192,16 @@ tb.appendChild(btn('Load Tip Board', async function() {
   try {
     var r = await fetch(url, {
       method: 'GET',
-      headers: { 'Accept': '*/*', 'Accept-Language': 'en-US', 'Authorization': 'BEARER ' + a.j, 'x-app-id': isAndroid ? 'ANDROID' : 'IOS', 'x-user-id': a.w },
-      referrer: '', credentials: 'include', cache: 'no-store'
+      headers: { 'Accept': '*/*', 'Accept-Language': 'en-US', 'Authorization': 'BEARER ' + a.j, 'x-user-id': a.w, 'x-app-id': isAndroid ? 'ANDROID' : 'IOS' },
+      headers: { 'Accept-Language': 'en-US', 'Authorization': 'BEARER ' + a.j, 'x-user-id': a.w },
+      referrer: '', credentials: 'omit', cache: 'no-store'
     });
     var txt = await r.text(); var d; try { d = JSON.parse(txt); } catch(e) { d = txt; }
-    if (r.status !== 200) { showRes('tb-res', {ok:false,status:r.status,data:d}); return; }
-    var exps = (d.availableExperiences || []);
-    var el = document.getElementById('tb-res');
-    el.style.display = 'block'; el.style.color = '#ddd'; el.textContent = '';
-    if (!exps.length) { el.textContent = 'No experiences found.'; return; }
-    exps.forEach(function(e) {
-      var div = document.createElement('div'); div.className = 'exp';
-      var name = document.createElement('div'); name.className = 'exp-name'; name.textContent = nm(e.id); div.appendChild(name);
+@@ -218,95 +215,95 @@
       var meta = document.createElement('div'); meta.className = 'exp-meta';
       var sb = e.standby || {};
       if (sb.waitTime != null) { var w = document.createElement('span'); w.className='wait'; w.textContent = sb.waitTime+'m wait'; meta.appendChild(w); }
+      if (e.flex && e.flex.available) { var ll = document.createElement('span'); ll.className='ll'; ll.textContent='⚡ '+(e.flex.nextAvailableTime||'avail'); meta.appendChild(ll); }
       if (e.flex && e.flex.available) { var ll = document.createElement('span'); ll.className='ll'; var t=e.flex.nextAvailableTime;if(t){var p=t.split(':');var h=+p[0];var ampm=h>=12?'pm':'am';h=h%12||12;ll.textContent='⚡ '+h+':'+p[1]+ampm;}else{ll.textContent='⚡ avail';} meta.appendChild(ll); }
       if (e.individual && e.individual.available) { var ip = document.createElement('span'); ip.className='price'; ip.textContent='💲 '+(e.individual.nextAvailableTime||'avail'); meta.appendChild(ip); }
       div.appendChild(meta);
