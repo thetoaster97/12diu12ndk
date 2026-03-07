@@ -1,39 +1,68 @@
 (function() {
 
+// ── Auth — matches bg1's OneID login flow exactly ────────────────────────────
+// Stores { accessToken, swid, expires } after login
+var _auth = null;
+
+function authReady() {
+  return _auth && _auth.accessToken && Date.now() < _auth.expires;
+}
+
+// Load OneID.js and trigger login popup — same clientId + responderPage as bg1
+function doLogin() {
+  return new Promise(function(resolve, reject) {
+    // Remove any existing OneID script
+    var existing = document.getElementById('oneid-script');
+    if (existing) existing.remove();
+    var script = document.createElement('script');
+    script.id = 'oneid-script';
+    script.src = 'https://cdn.registerdisney.go.com/v4/OneID.js';
+    script.onload = function() {
+      try {
+        window.OneID.launchLogin('WDW', function(token) {
+          if (!token || !token.access_token) { reject(new Error('Login failed or cancelled')); return; }
+          _auth = {
+            accessToken: token.access_token,
+            swid: token.swid,
+            expires: new Date(token.exp).getTime()
+          };
+          // Update badge
+          var b = document.getElementById('auth-badge');
+          if (b) { b.textContent = '✓ ' + _auth.swid.slice(0,8) + '...'; b.className = 'badge ok'; }
+          resolve(_auth);
+        }, {
+          clientId: 'TPR-WDW-LBSDK.AND-PROD',
+          responderPage: 'https://joelface.github.io/bg1/responder.html'
+        });
+      } catch(e) { reject(e); }
+    };
+    script.onerror = function() { reject(new Error('Failed to load OneID.js')); };
+    document.head.appendChild(script);
+  });
+}
+
 function ga() {
-  var t = document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('TPR-WDW-LBJS.WEB-PROD.token=');});
-  if (!t) return null;
-  try {
-    var raw = decodeURIComponent(t.split('=').slice(1).join('='));
-    var jwt = raw.split('|').pop();
-    if (!jwt || !jwt.startsWith('eyJ')) return null;
-    var s = document.cookie.split(';').map(function(c){return c.trim();}).find(function(c){return c.startsWith('SWID=');});
-    var swid = s ? s.split('=').slice(1).join('=') : '';
-    return { j: jwt, w: swid };
-  } catch(e) { return null; }
+  return authReady() ? _auth : null;
 }
 
 var BASE = 'https://disneyworld.disney.go.com';
 
 async function api(path, body) {
   var a = ga();
-  if (!a) return { ok: false, status: 0, data: 'Not logged in' };
-  // Fetch fresh sensor data every call
+  if (!a) return { ok: false, status: 0, data: 'Not logged in — press Login first' };
   var sensor = '';
   try {
     var sr = await fetch('https://bg1.joelface.com/sensor-data/random', { cache: 'no-store' });
     sensor = await sr.text();
-    // If it's JSON, try to extract the string value
     try { var sd = JSON.parse(sensor); sensor = Object.values(sd)[0] || sensor; } catch(e) {}
     sensor = sensor.trim();
   } catch(e) { console.warn('sensor fetch failed', e); }
-
   var headers = {
     'Accept': '*/*',
     'Accept-Language': 'en-US',
-    'Authorization': 'BEARER ' + a.j,
+    'Authorization': 'BEARER ' + a.accessToken,
     'Content-Type': 'application/json',
-    'x-user-id': a.w,
+    'x-user-id': a.swid,
     'x-app-id': 'ANDROID',
     'x-acf-sensor-data': sensor
   };
@@ -159,10 +188,26 @@ var auth = ga();
 // ── Header ────────────────────────────────────────────────────────────────────
 var hd = document.createElement('div'); hd.id = 'hd';
 var h1el = document.createElement('h1'); h1el.textContent = '⚡ LL Tool'; hd.appendChild(h1el);
-var authBadge = document.createElement('span');
-authBadge.className = 'badge ' + (auth ? 'ok' : 'no');
-authBadge.textContent = auth ? '✓ ' + auth.w.slice(0,8) + '...' : '✗ not logged in';
+var authBadge = document.createElement('span'); authBadge.id = 'auth-badge';
+authBadge.className = 'badge no'; authBadge.textContent = '✗ not logged in';
 hd.appendChild(authBadge);
+var loginBtn = document.createElement('button');
+loginBtn.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #00d4ff44;background:rgba(0,212,255,.12);color:#00d4ff;cursor:pointer;font-family:monospace;font-size:.6rem;font-weight:bold;letter-spacing:.05em';
+loginBtn.textContent = 'Login';
+loginBtn.onclick = function() {
+  loginBtn.textContent = '...';
+  loginBtn.disabled = true;
+  doLogin().then(function() {
+    loginBtn.textContent = 'Re-login';
+    loginBtn.disabled = false;
+  }).catch(function(e) {
+    authBadge.textContent = '✗ ' + e.message;
+    authBadge.className = 'badge no';
+    loginBtn.textContent = 'Login';
+    loginBtn.disabled = false;
+  });
+};
+hd.appendChild(loginBtn);
 var namesBadge = document.createElement('span');
 namesBadge.className = 'badge info';
 namesBadge.textContent = '⟳ names';
@@ -248,16 +293,16 @@ async function doLoadTipBoard() {
   var dt = document.getElementById('tb-date').value;
   var llOnly = document.getElementById('tb-ll-only').checked;
   var a = ga();
-  if (!a) { showRes('tb-res', {ok:false,status:0,data:'Not logged in'}); return; }
-  var url = BASE + '/tipboard-vas/planning/v1/parks/' + pk + '/experiences/?date=' + dt + '&userId=' + encodeURIComponent(a.w);
+  if (!a) { showRes('tb-res', {ok:false,status:0,data:'Not logged in — press Login first'}); return; }
+  var url = BASE + '/tipboard-vas/planning/v1/parks/' + pk + '/experiences/?date=' + dt + '&userId=' + encodeURIComponent(a.swid);
   try {
     var r = await fetch(url, {
       method: 'GET',
       headers: {
         'Accept': '*/*',
         'Accept-Language': 'en-US',
-        'Authorization': 'BEARER ' + a.j,
-        'x-user-id': a.w,
+        'Authorization': 'BEARER ' + a.accessToken,
+        'x-user-id': a.swid,
         'x-app-id': 'ANDROID'
       },
       referrer: '', credentials: 'omit', cache: 'no-store'
