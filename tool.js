@@ -19,21 +19,43 @@ function doLogin() {
     script.src = 'https://cdn.registerdisney.go.com/v4/OneID.js';
     script.onload = function() {
       try {
-        window.OneID.launchLogin('WDW', function(token) {
+        // Log what's actually on OneID so we can see the real API shape
+        console.log('[LL] OneID keys:', Object.keys(window.OneID || {}));
+
+        var OID = window.OneID;
+        if (!OID) { reject(new Error('OneID not found on window')); return; }
+
+        function onToken(token) {
           if (!token || !token.access_token) { reject(new Error('Login failed or cancelled')); return; }
           _auth = {
             accessToken: token.access_token,
             swid: token.swid,
             expires: new Date(token.exp).getTime()
           };
-          // Update badge
           var b = document.getElementById('auth-badge');
           if (b) { b.textContent = '✓ ' + _auth.swid.slice(0,8) + '...'; b.className = 'badge ok'; }
           resolve(_auth);
-        }, {
+        }
+
+        var opts = {
           clientId: 'TPR-WDW-LBSDK.AND-PROD',
           responderPage: 'https://joelface.github.io/bg1/responder.html'
-        });
+        };
+
+        // Try every known method name OneID has used across versions
+        if (typeof OID.launchLogin === 'function') {
+          OID.launchLogin('WDW', onToken, opts);
+        } else if (typeof OID.login === 'function') {
+          OID.login(opts, onToken);
+        } else if (typeof OID.getClient === 'function') {
+          OID.getClient(opts).launchLogin('WDW', onToken);
+        } else if (typeof OID.init === 'function') {
+          OID.init(opts);
+          if (typeof OID.launchLogin === 'function') OID.launchLogin('WDW', onToken, opts);
+          else reject(new Error('OneID loaded but no login method found. Keys: ' + Object.keys(OID).join(', ')));
+        } else {
+          reject(new Error('OneID API unknown. Keys: ' + Object.keys(OID).join(', ')));
+        }
       } catch(e) { reject(e); }
     };
     script.onerror = function() { reject(new Error('Failed to load OneID.js')); };
