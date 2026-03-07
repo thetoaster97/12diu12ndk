@@ -311,12 +311,20 @@
     var raw=document.createElement('div');raw.className='bk-raw';raw.id='bk-raw';
     pane.appendChild(raw);
 
-    // Party section
+    // Party section — summary row with Change button, expandable list
     var partySec=document.createElement('div');partySec.className='bk-section';
-    var partyTitle=document.createElement('div');partyTitle.className='bk-section-title';partyTitle.textContent='Your Party';
-    partySec.appendChild(partyTitle);
-    var partyList=document.createElement('div');partyList.id='bk-party';partyList.textContent='Loading...';
-    partySec.appendChild(partyList);
+    var partyHeader=document.createElement('div');partyHeader.style.cssText='display:flex;align-items:center;gap:8px';
+    var partyLabel=document.createElement('div');partyLabel.className='bk-section-title';partyLabel.style.margin='0';partyLabel.textContent='Guests';
+    var partySummary=document.createElement('span');partySummary.id='bk-party-summary';partySummary.style.cssText='font-size:12px;color:#aaa;flex:1';partySummary.textContent='...';
+    var changeBtn=document.createElement('button');changeBtn.id='bk-change-btn';changeBtn.style.cssText='background:none;border:1px solid #2a2a3a;border-radius:4px;color:#00d4ff;font-family:monospace;font-size:.6rem;cursor:pointer;padding:3px 8px';changeBtn.textContent='Change';
+    var partyExpand=document.createElement('div');partyExpand.id='bk-party-expand';partyExpand.style.cssText='display:none;margin-top:10px';
+    var partyList=document.createElement('div');partyList.id='bk-party';partyExpand.appendChild(partyList);
+    var confirmBtn=document.createElement('button');confirmBtn.style.cssText='margin-top:8px;width:100%;padding:10px;border-radius:6px;border:1px solid #00d4ff33;background:rgba(0,212,255,.1);color:#00d4ff;cursor:pointer;font-family:monospace;font-size:13px;font-weight:bold';confirmBtn.textContent='Confirm Party';
+    confirmBtn.onclick=function(){partyExpand.style.display='none';changeBtn.textContent='Change';renderPartySummary();doGenerateOffer();};
+    changeBtn.onclick=function(){var open=partyExpand.style.display!=='none';partyExpand.style.display=open?'none':'block';changeBtn.textContent=open?'Change':'Cancel';};
+    partyExpand.appendChild(confirmBtn);
+    partyHeader.appendChild(partyLabel);partyHeader.appendChild(partySummary);partyHeader.appendChild(changeBtn);
+    partySec.appendChild(partyHeader);partySec.appendChild(partyExpand);
     pane.appendChild(partySec);
 
     // Selected time display + buttons
@@ -397,32 +405,27 @@
       showRaw(JSON.stringify(r.data,null,2),'#ff4757');
       return;
     }
-
+    // Combine eligible + ineligible — default everyone selected
+    var allG=(r.data.guests||[]).concat(r.data.ineligibleGuests||[]);
     _bk.eligGuests=r.data.guests||[];
     _bk.ineligGuests=r.data.ineligibleGuests||[];
-
-    // Default all eligible guests selected
     _bk.selGuests={};
-    _bk.eligGuests.forEach(function(g){_bk.selGuests[g.id]=true;});
-
+    allG.forEach(function(g){_bk.selGuests[g.id]=true;});
     renderParty();
+    renderPartySummary();
+    await doGenerateOffer();
+  }
 
-    // Determine status
-    if(_bk.eligGuests.length===0){
-      var reasons=(_bk.ineligGuests).map(function(g){
-        return (g.ineligibleReason&&g.ineligibleReason.ineligibleReason)||'';
-      });
-      var allMulti=reasons.length>0&&reasons.every(function(r){return r==='MULTI_PASS_NEEDED';});
-      if(allMulti){
-        setStatus('⚠ Multipass Needed','bk-multi');
-      }else{
-        setStatus('Unavailable','bk-unavail');
-      }
-      // Show full guests response
-      showRaw(JSON.stringify(r.data,null,2),'#ffd166');
-    }else{
-      await doGenerateOffer();
-    }
+  function renderPartySummary(){
+    var el=document.getElementById('bk-party-summary');if(!el)return;
+    var sel=Object.keys(_bk.selGuests).filter(function(k){return _bk.selGuests[k];});
+    var names=[];
+    var all=_bk.eligGuests.concat(_bk.ineligGuests);
+    sel.forEach(function(id){
+      var g=all.find(function(x){return x.id===id;});
+      if(g)names.push(g.firstName||g.displayName||'Guest');
+    });
+    el.textContent=names.join(', ')||'None';
   }
 
   function renderParty(){
@@ -430,43 +433,26 @@
     list.innerHTML='';
     var all=_bk.eligGuests.concat(_bk.ineligGuests);
     if(!all.length){list.textContent='No guests found.';return;}
-    // Pill-style buttons - tap to toggle in/out of party
     all.forEach(function(g){
-      var isElig=_bk.eligGuests.indexOf(g)!==-1;
-      var isSel=!!_bk.selGuests[g.id];
-      var btn=document.createElement('button');
-      btn.style.cssText=[
-        'display:inline-flex;align-items:center;gap:6px',
-        'margin:0 6px 6px 0;padding:7px 12px',
-        'border-radius:20px;border:1px solid '+(isSel?'#00d4ff':'#2a2a3a'),
-        'background:'+(isSel?'rgba(0,212,255,.15)':'#0e0e1c'),
-        'color:'+(isElig?(isSel?'#00d4ff':'#aaa'):'#555'),
-        'cursor:'+(isElig?'pointer':'default'),
-        'font-family:monospace;font-size:12px'
-      ].join(';');
-      var dot=document.createElement('span');
-      dot.textContent=isSel?'●':'○';
-      dot.style.fontSize='10px';
-      btn.appendChild(dot);
-      var nameSpan=document.createElement('span');
-      nameSpan.textContent=(g.firstName||g.displayName||'Guest')+(g.primary?' ★':'');
-      btn.appendChild(nameSpan);
-      if(!isElig&&g.ineligibleReason){
-        var reasonSpan=document.createElement('span');
-        reasonSpan.style.cssText='font-size:9px;color:#ffd166;margin-left:2px';
-        reasonSpan.textContent='('+String(g.ineligibleReason.ineligibleReason||'').replace(/_/g,' ').toLowerCase()+')';
-        btn.appendChild(reasonSpan);
+      var row=document.createElement('div');row.className='guest-row';
+      var cb=document.createElement('input');cb.type='checkbox';
+      cb.checked=!!_bk.selGuests[g.id];
+      cb.onchange=function(){_bk.selGuests[g.id]=cb.checked;};
+      row.appendChild(cb);
+      var wrap=document.createElement('div');wrap.style.flex='1';
+      var nameEl=document.createElement('div');nameEl.className='guest-name';
+      nameEl.textContent=(g.firstName||g.displayName||'Guest')+' '+(g.lastName||'')+(g.primary?' ★':'');
+      wrap.appendChild(nameEl);
+      if(g.ineligibleReason){
+        var reason=document.createElement('div');reason.className='guest-reason';
+        reason.textContent=String(g.ineligibleReason.ineligibleReason||g.ineligibleReason||'').replace(/_/g,' ').toLowerCase();
+        wrap.appendChild(reason);
       }
-      if(isElig){
-        btn.onclick=function(){
-          _bk.selGuests[g.id]=!_bk.selGuests[g.id];
-          renderParty();
-          doGenerateOffer();
-        };
-      }
-      list.appendChild(btn);
+      row.appendChild(wrap);
+      list.appendChild(row);
     });
   }
+
 
   async function doGenerateOffer(){
     var selIds=getSelIds();
