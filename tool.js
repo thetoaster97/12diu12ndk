@@ -319,12 +319,17 @@
     partySec.appendChild(partyList);
     pane.appendChild(partySec);
 
-    // Time section
+    // Selected time display + buttons
     var timeSec=document.createElement('div');timeSec.className='bk-section';
-    var timeTitle=document.createElement('div');timeTitle.className='bk-section-title';timeTitle.textContent='Return Time';
-    timeSec.appendChild(timeTitle);
+
+    // Selected time display
+    var selTimeEl=document.createElement('div');selTimeEl.id='bk-sel-time';
+    selTimeEl.style.cssText='font-size:20px;font-weight:bold;color:#00d4ff;margin-bottom:10px';
+    timeSec.appendChild(selTimeEl);
+
+    // More times grid (hidden until expanded)
     var timeGrid=document.createElement('div');timeGrid.className='time-grid';timeGrid.id='bk-times';
-    timeGrid.textContent='—';
+    timeGrid.style.display='none';
     timeSec.appendChild(timeGrid);
     pane.appendChild(timeSec);
 
@@ -332,7 +337,7 @@
     var btnRow=document.createElement('div');btnRow.className='btn-row';
 
     var bookBtn=mkbtn('Book LL','btn',async function(){
-      if(!_bk.selOffer){showRaw('Select a return time first','#ff4757');return;}
+      if(!_bk.selOffer){showRaw('No time selected','#ff4757');return;}
       bookBtn.textContent='Booking...';bookBtn.disabled=true;
       var selIds=getSelIds();
       var r=await api('/ea-vas/planning/api/v1/experiences/offerset/times/fulfill',{
@@ -359,13 +364,10 @@
       if(!r.ok){showRaw(JSON.stringify(r.data,null,2),'#ff4757');return;}
       _bk.offerSetId=r.data.offerSetId;
       _bk.offers=r.data.offers||[];
-      _bk.selOffer=null;
+      _bk.selOffer=_bk.offers[0]||null;
       renderTimes();
-      if(_bk.offers.length){
-        setStatus('Mod times loaded — pick one','bk-avail');
-      }else{
-        setStatus('No mod times available','bk-unavail');
-      }
+      if(_bk.offers.length){setStatus('⚡ Mod times loaded','bk-avail');}
+      else{setStatus('No mod times available','bk-unavail');}
       showRaw(JSON.stringify(r.data,null,2),'#2ed573');
     });
     btnRow.appendChild(modBtn);
@@ -428,27 +430,41 @@
     list.innerHTML='';
     var all=_bk.eligGuests.concat(_bk.ineligGuests);
     if(!all.length){list.textContent='No guests found.';return;}
+    // Pill-style buttons - tap to toggle in/out of party
     all.forEach(function(g){
       var isElig=_bk.eligGuests.indexOf(g)!==-1;
-      var row=document.createElement('div');row.className='guest-row'+(isElig?'':' guest-inelig');
-      var cb=document.createElement('input');cb.type='checkbox';
-      cb.checked=isElig&&!!_bk.selGuests[g.id];cb.disabled=!isElig;
-      cb.onchange=function(){
-        _bk.selGuests[g.id]=cb.checked;
-        doGenerateOffer();
-      };
-      row.appendChild(cb);
-      var wrap=document.createElement('div');wrap.style.flex='1';
-      var nameEl=document.createElement('div');nameEl.className='guest-name';
-      nameEl.textContent=(g.firstName||'')+' '+(g.lastName||'')+(g.primary?' ★':'');
-      wrap.appendChild(nameEl);
+      var isSel=!!_bk.selGuests[g.id];
+      var btn=document.createElement('button');
+      btn.style.cssText=[
+        'display:inline-flex;align-items:center;gap:6px',
+        'margin:0 6px 6px 0;padding:7px 12px',
+        'border-radius:20px;border:1px solid '+(isSel?'#00d4ff':'#2a2a3a'),
+        'background:'+(isSel?'rgba(0,212,255,.15)':'#0e0e1c'),
+        'color:'+(isElig?(isSel?'#00d4ff':'#aaa'):'#555'),
+        'cursor:'+(isElig?'pointer':'default'),
+        'font-family:monospace;font-size:12px'
+      ].join(';');
+      var dot=document.createElement('span');
+      dot.textContent=isSel?'●':'○';
+      dot.style.fontSize='10px';
+      btn.appendChild(dot);
+      var nameSpan=document.createElement('span');
+      nameSpan.textContent=(g.firstName||g.displayName||'Guest')+(g.primary?' ★':'');
+      btn.appendChild(nameSpan);
       if(!isElig&&g.ineligibleReason){
-        var reason=document.createElement('div');reason.className='guest-reason';
-        reason.textContent=String(g.ineligibleReason.ineligibleReason||g.ineligibleReason||'').replace(/_/g,' ');
-        wrap.appendChild(reason);
+        var reasonSpan=document.createElement('span');
+        reasonSpan.style.cssText='font-size:9px;color:#ffd166;margin-left:2px';
+        reasonSpan.textContent='('+String(g.ineligibleReason.ineligibleReason||'').replace(/_/g,' ').toLowerCase()+')';
+        btn.appendChild(reasonSpan);
       }
-      row.appendChild(wrap);
-      list.appendChild(row);
+      if(isElig){
+        btn.onclick=function(){
+          _bk.selGuests[g.id]=!_bk.selGuests[g.id];
+          renderParty();
+          doGenerateOffer();
+        };
+      }
+      list.appendChild(btn);
     });
   }
 
@@ -471,37 +487,76 @@
     document.getElementById('bk-raw').style.display='none';
     _bk.offerSetId=r.data.offerSetId;
     _bk.offers=r.data.offers||(r.data.offer?[r.data.offer]:[]);
-    _bk.selOffer=null;
 
-    // Find earliest time across all offers
-    var earliest=null;
-    _bk.offers.forEach(function(o){
-      var t=o.startDateTime||o.startTime||(o.flex&&o.flex.nextAvailableTime);
-      if(t&&(!earliest||t<earliest))earliest=t;
+    // Auto-select earliest offer
+    _bk.selOffer=_bk.offers.length?_bk.offers[0]:null;
+    // Sort by time just in case
+    _bk.offers.sort(function(a,b){
+      var ta=a.startDateTime||a.startTime||'';
+      var tb=b.startDateTime||b.startTime||'';
+      return ta<tb?-1:ta>tb?1:0;
     });
+    _bk.selOffer=_bk.offers.length?_bk.offers[0]:null;
 
-    if(_bk.offers.length===0){
-      setStatus('Unavailable','bk-unavail');
-    }else if(earliest){
-      setStatus('⚡ Next: '+fmtTime(earliest),'bk-avail');
+    if(!_bk.offers.length){
+      setStatus('No times available','bk-unavail');
     }else{
-      setStatus('⚡ Available','bk-avail');
+      var t=_bk.selOffer.startDateTime||_bk.selOffer.startTime||'';
+      setStatus('⚡ '+fmtTime(t),'bk-avail');
     }
     renderTimes();
   }
 
   function renderTimes(){
-    var grid=document.getElementById('bk-times');if(!grid)return;
+    var grid=document.getElementById('bk-times');
+    var selEl=document.getElementById('bk-sel-time');
+    if(!grid||!selEl)return;
+
+    if(!_bk.offers.length){
+      selEl.textContent='No times available';
+      selEl.style.color='#555';selEl.style.fontSize='16px';
+      grid.style.display='none';
+      return;
+    }
+
+    // Show selected time big
+    var selT=_bk.selOffer?((_bk.selOffer.startDateTime||_bk.selOffer.startTime||'')):'';
+    selEl.textContent=selT?fmtTime(selT):'Pick a time';
+    selEl.style.color='#00d4ff';selEl.style.fontSize='20px';
+
+    // Build grid (hidden until "Change Time" pressed)
     grid.innerHTML='';
-    if(!_bk.offers.length){grid.textContent='No times available';return;}
     _bk.offers.forEach(function(offer){
-      var t=offer.startDateTime||offer.startTime||(offer.flex&&offer.flex.nextAvailableTime)||'?';
+      var t=offer.startDateTime||offer.startTime||'?';
       var btn=document.createElement('button');
       btn.className='time-btn'+(_bk.selOffer===offer?' sel':'');
       btn.textContent=fmtTime(t);
-      btn.onclick=function(){_bk.selOffer=offer;renderTimes();};
+      btn.onclick=function(){
+        _bk.selOffer=offer;
+        var newT=offer.startDateTime||offer.startTime||'';
+        selEl.textContent=newT?fmtTime(newT):'?';
+        // Update selection highlight
+        grid.querySelectorAll('.time-btn').forEach(function(b){b.classList.remove('sel');});
+        btn.classList.add('sel');
+        grid.style.display='none';
+        changeTimeBtn.textContent='Change Time';
+      };
       grid.appendChild(btn);
     });
+
+    // Add/update "Change Time" button right after selEl
+    var existingBtn=document.getElementById('bk-change-time-btn');
+    if(existingBtn)existingBtn.remove();
+    var changeTimeBtn=document.createElement('button');
+    changeTimeBtn.id='bk-change-time-btn';
+    changeTimeBtn.style.cssText='background:none;border:none;color:#00d4ff;font-family:monospace;font-size:.65rem;cursor:pointer;padding:0 0 4px 0;opacity:.7';
+    changeTimeBtn.textContent='Change Time';
+    changeTimeBtn.onclick=function(){
+      var open=grid.style.display!=='none';
+      grid.style.display=open?'none':'grid';
+      changeTimeBtn.textContent=open?'Change Time':'Hide Times';
+    };
+    selEl.insertAdjacentElement('afterend',changeTimeBtn);
   }
 
   // ── Tip Board ────────────────────────────────────────────────────────────────
