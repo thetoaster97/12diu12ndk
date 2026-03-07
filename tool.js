@@ -46,13 +46,11 @@
     if (!token || !token.access_token) {
       throw new Error('Login did not return access_token');
     }
-
     _auth = {
       accessToken: token.access_token,
       swid: token.swid,
       expires: new Date(token.exp).getTime()
     };
-
     clearOneIdGuestData();
     setBadgeOk();
     return _auth;
@@ -60,27 +58,17 @@
 
   function loadOneIdScript() {
     return new Promise(function(resolve, reject) {
-      if (window.OneID) {
-        resolve(window.OneID);
-        return;
-      }
-
+      if (window.OneID) { resolve(window.OneID); return; }
       var existing = document.getElementById(ONEID_SCRIPT_ID);
       if (existing) {
         var triesExisting = 0;
         var timerExisting = setInterval(function() {
           triesExisting++;
-          if (window.OneID) {
-            clearInterval(timerExisting);
-            resolve(window.OneID);
-          } else if (triesExisting > 150) {
-            clearInterval(timerExisting);
-            reject(new Error('Timed out waiting for OneID'));
-          }
+          if (window.OneID) { clearInterval(timerExisting); resolve(window.OneID); }
+          else if (triesExisting > 150) { clearInterval(timerExisting); reject(new Error('Timed out waiting for OneID')); }
         }, 100);
         return;
       }
-
       var script = document.createElement('script');
       script.id = ONEID_SCRIPT_ID;
       script.src = ONEID_SCRIPT_URL;
@@ -88,18 +76,11 @@
         var tries = 0;
         var timer = setInterval(function() {
           tries++;
-          if (window.OneID) {
-            clearInterval(timer);
-            resolve(window.OneID);
-          } else if (tries > 150) {
-            clearInterval(timer);
-            reject(new Error('Timed out waiting for OneID'));
-          }
+          if (window.OneID) { clearInterval(timer); resolve(window.OneID); }
+          else if (tries > 150) { clearInterval(timer); reject(new Error('Timed out waiting for OneID')); }
         }, 100);
       };
-      script.onerror = function() {
-        reject(new Error('Failed to load OneID.js'));
-      };
+      script.onerror = function() { reject(new Error('Failed to load OneID.js')); };
       document.head.appendChild(script);
     });
   }
@@ -113,23 +94,11 @@
 
   async function getOneIdClient(resortId) {
     if (_oneIdClient) return _oneIdClient;
-
     var oneid = await loadOneIdScript();
     _oneIdClientId = getClientId(resortId);
-
-    if (typeof oneid.get !== 'function') {
-      throw new Error('OneID.get unavailable');
-    }
-
-    var client = oneid.get({
-      clientId: _oneIdClientId,
-      responderPage: ONEID_RESPONDER
-    });
-
-    if (!client || typeof client.init !== 'function') {
-      throw new Error('Invalid OneID client');
-    }
-
+    if (typeof oneid.get !== 'function') throw new Error('OneID.get unavailable');
+    var client = oneid.get({ clientId: _oneIdClientId, responderPage: ONEID_RESPONDER });
+    if (!client || typeof client.init !== 'function') throw new Error('Invalid OneID client');
     await client.init();
     _oneIdClient = client;
     clearOneIdGuestData();
@@ -147,100 +116,57 @@
         if (shape === 'client') {
           var client = await getOneIdClient(resortId);
           var settled = false;
-
-          function doneOk(val) {
-            if (settled) return;
-            settled = true;
-            resolve(val);
-          }
-
-          function doneErr(err) {
-            if (settled) return;
-            settled = true;
-            reject(err);
-          }
-
+          function doneOk(val) { if (settled) return; settled = true; resolve(val); }
+          function doneErr(err) { if (settled) return; settled = true; reject(err); }
           function onLogin(data) {
-            try {
-              var token = data && data.token;
-              doneOk(setAuthFromToken(token));
-            } catch (e) {
-              doneErr(e);
-            }
+            try { doneOk(setAuthFromToken(data && data.token)); } catch (e) { doneErr(e); }
           }
-
-          function onError(err) {
-            doneErr(new Error((err && err.message) || 'Login failed'));
-          }
-
+          function onError(err) { doneErr(new Error((err && err.message) || 'Login failed')); }
           try {
             if (typeof client.off === 'function') {
               try { client.off('login', onLogin); } catch (e) {}
               try { client.off('error', onError); } catch (e) {}
             }
           } catch (e) {}
-
-          if (typeof client.on === 'function') {
-            client.on('login', onLogin);
-            client.on('error', onError);
-          }
-
-          // Important: no auto-reopen on close here.
+          if (typeof client.on === 'function') { client.on('login', onLogin); client.on('error', onError); }
           client.launchLogin();
           return;
         }
 
         if (shape === 'direct') {
-          oneid.launchLogin(
-            resortId,
-            function(result) {
-              try {
-                var token = (result && result.token) ? result.token : result;
-                resolve(setAuthFromToken(token));
-              } catch (e) {
-                reject(e);
-              }
-            },
-            {
-              clientId: _oneIdClientId,
-              responderPage: ONEID_RESPONDER
-            }
-          );
+          oneid.launchLogin(resortId, function(result) {
+            try {
+              var token = (result && result.token) ? result.token : result;
+              resolve(setAuthFromToken(token));
+            } catch (e) { reject(e); }
+          }, { clientId: _oneIdClientId, responderPage: ONEID_RESPONDER });
           return;
         }
 
         reject(new Error('Unsupported OneID runtime'));
-      } catch (e) {
-        reject(e);
-      }
+      } catch (e) { reject(e); }
     });
   }
 
-  function ga() {
-    return authReady() ? _auth : null;
-  }
+  function ga() { return authReady() ? _auth : null; }
 
   // ── API ──────────────────────────────────────────────────────────────────────
   var BASE = 'https://disneyworld.disney.go.com';
   var today = new Date().toISOString().split('T')[0];
 
+  async function getSensor() {
+    try {
+      var sr = await fetch('https://bg1.joelface.com/sensor-data/random', { cache: 'no-store' });
+      var txt = await sr.text();
+      try { var sd = JSON.parse(txt); txt = Object.values(sd)[0] || txt; } catch(e) {}
+      return String(txt || '').trim();
+    } catch(e) { return ''; }
+  }
+
   async function api(path, body) {
     var a = ga();
     if (!a) return { ok: false, status: 0, data: 'Not logged in — press Login first' };
-
-    var sensor = '';
-    try {
-      var sr = await fetch('https://bg1.joelface.com/sensor-data/random', { cache: 'no-store' });
-      sensor = await sr.text();
-      try {
-        var sd = JSON.parse(sensor);
-        sensor = Object.values(sd)[0] || sensor;
-      } catch (e) {}
-      sensor = String(sensor || '').trim();
-    } catch (e) {
-      console.warn('sensor fetch failed', e);
-    }
-
+    var sensor = await getSensor();
     var headers = {
       'Accept': '*/*',
       'Accept-Language': 'en-US',
@@ -250,23 +176,46 @@
       'x-app-id': 'ANDROID',
       'x-acf-sensor-data': sensor
     };
-
     try {
       var r = await fetch(BASE + path, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify(body),
-        referrer: '',
-        credentials: 'omit',
-        cache: 'no-store'
+        method: 'POST', headers: headers, body: JSON.stringify(body),
+        referrer: '', credentials: 'omit', cache: 'no-store'
       });
       var txt = await r.text();
-      var d;
-      try { d = JSON.parse(txt); } catch (e) { d = txt; }
+      var d; try { d = JSON.parse(txt); } catch(e) { d = txt; }
       return { ok: r.status === 200, status: r.status, data: d };
-    } catch (e) {
-      return { ok: false, status: 0, data: e.message };
-    }
+    } catch(e) { return { ok: false, status: 0, data: e.message }; }
+  }
+
+  async function apiGet(path) {
+    var a = ga();
+    if (!a) return { ok: false, status: 0, data: 'Not logged in' };
+    var headers = {
+      'Accept': '*/*',
+      'Accept-Language': 'en-US',
+      'Authorization': 'BEARER ' + a.accessToken,
+      'x-user-id': a.swid
+    };
+    try {
+      var r = await fetch(BASE + path, {
+        method: 'GET', headers: headers,
+        referrer: '', credentials: 'omit', cache: 'no-store'
+      });
+      var txt = await r.text();
+      var d; try { d = JSON.parse(txt); } catch(e) { d = txt; }
+      return { ok: r.status === 200, status: r.status, data: d };
+    } catch(e) { return { ok: false, status: 0, data: e.message }; }
+  }
+
+  // Fetch guests for a specific ride + park, returns array of guest ids
+  async function fetchGuestIds(facilityId, parkId) {
+    var r = await api('/ea-vas/planning/api/v1/experiences/guest/guests', {
+      date: today,
+      facilityId: facilityId || null,
+      parkId: parkId
+    });
+    if (!r.ok) return [];
+    return (r.data.guests || []).map(function(g) { return g.id; });
   }
 
   var PARKS = [
@@ -300,13 +249,7 @@
     if (namesLoaded) return;
     try {
       var url = BASE + '/finder/api/v1/explorer-service/list-ancestor-entities/wdw/80007798;entityType=destination/' + today + '/attractions';
-      var r = await fetch(url, {
-        method: 'GET',
-        headers: { 'Accept-Language': 'en-US' },
-        referrer: '',
-        credentials: 'omit',
-        cache: 'no-store'
-      });
+      var r = await fetch(url, { method: 'GET', headers: { 'Accept-Language': 'en-US' }, referrer: '', credentials: 'omit', cache: 'no-store' });
       if (!r.ok) return;
       var d = await r.json();
       (d.results || []).forEach(function(item) {
@@ -315,9 +258,7 @@
         if (numId && item.name) DYNAMIC_NAMES[numId] = item.name;
       });
       namesLoaded = true;
-    } catch (e) {
-      console.warn('Could not load attraction names:', e);
-    }
+    } catch(e) { console.warn('Could not load attraction names:', e); }
   }
 
   function nm(id) {
@@ -358,54 +299,44 @@
     '.exp-name{font-size:13px;margin-bottom:4px}',
     '.exp-meta{display:flex;gap:10px;font-size:11px;color:#555;flex-wrap:wrap}',
     '.ll{color:#00d4ff}.wait{color:#888}.price{color:#ffd166}',
-    '.guest{padding:8px 10px;background:#0d0d1a;border:1px solid #1e1e2e;border-radius:6px;margin-bottom:6px;font-size:13px}',
-    '.guest-id{font-size:10px;color:#555;word-break:break-all;margin-top:2px}',
     '.sec{font-size:.55rem;color:#555;text-transform:uppercase;letter-spacing:.12em;margin:12px 0 6px}',
     '.inelig{opacity:.45}',
     '.filter-row{display:flex;align-items:center;gap:8px;margin:10px 0 6px;cursor:pointer}',
     '.filter-row input[type=checkbox]{width:15px;height:15px;accent-color:#00d4ff;cursor:pointer;flex-shrink:0}',
-    '.filter-row span{font-size:.65rem;color:#888;text-transform:uppercase;letter-spacing:.1em}'
+    '.filter-row span{font-size:.65rem;color:#888;text-transform:uppercase;letter-spacing:.1em}',
+    // Plan tab styles
+    '.plan-item{padding:10px;background:#0d0d1a;border:1px solid #1e1e2e;border-radius:6px;margin-bottom:8px}',
+    '.plan-item-name{font-size:13px;margin-bottom:3px}',
+    '.plan-item-meta{font-size:11px;color:#555;display:flex;gap:10px;flex-wrap:wrap}',
+    '.plan-date{color:#00d4ff}.plan-park{color:#888}.plan-guests{color:#2ed573;font-size:10px;margin-top:3px}'
   ].join('');
   document.head.appendChild(st);
 
   // ── Header ───────────────────────────────────────────────────────────────────
-  var hd = document.createElement('div');
-  hd.id = 'hd';
-
-  var h1el = document.createElement('h1');
-  h1el.textContent = '⚡ LL Tool';
-  hd.appendChild(h1el);
+  var hd = document.createElement('div'); hd.id = 'hd';
+  var h1el = document.createElement('h1'); h1el.textContent = '⚡ LL Tool'; hd.appendChild(h1el);
 
   var authBadge = document.createElement('span');
-  authBadge.id = 'auth-badge';
-  authBadge.className = 'badge no';
-  authBadge.textContent = '✗ not logged in';
+  authBadge.id = 'auth-badge'; authBadge.className = 'badge no'; authBadge.textContent = '✗ not logged in';
   hd.appendChild(authBadge);
 
   var loginBtn = document.createElement('button');
   loginBtn.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #00d4ff44;background:rgba(0,212,255,.12);color:#00d4ff;cursor:pointer;font-family:monospace;font-size:.6rem;font-weight:bold;letter-spacing:.05em';
   loginBtn.textContent = 'Login';
   loginBtn.onclick = function() {
-    loginBtn.textContent = '...';
-    loginBtn.disabled = true;
-
+    loginBtn.textContent = '...'; loginBtn.disabled = true;
     doLogin().then(function() {
-      loginBtn.textContent = 'Re-login';
-      loginBtn.disabled = false;
+      loginBtn.textContent = 'Re-login'; loginBtn.disabled = false;
     }).catch(function(e) {
       setBadgeErr((e && e.message) || 'login failed');
-      loginBtn.textContent = 'Login';
-      loginBtn.disabled = false;
-      console.error('OneID login error:', e);
+      loginBtn.textContent = 'Login'; loginBtn.disabled = false;
     });
   };
   hd.appendChild(loginBtn);
 
   var namesBadge = document.createElement('span');
-  namesBadge.className = 'badge info';
-  namesBadge.textContent = '⟳ names';
+  namesBadge.className = 'badge info'; namesBadge.textContent = '⟳ names';
   hd.appendChild(namesBadge);
-
   document.body.appendChild(hd);
 
   loadAttractionNames().then(function() {
@@ -415,18 +346,16 @@
   });
 
   // ── Tabs ─────────────────────────────────────────────────────────────────────
-  var tabBar = document.createElement('div');
-  tabBar.id = 'tabs';
-  var bodyDiv = document.createElement('div');
-  bodyDiv.id = 'body';
+  var tabBar = document.createElement('div'); tabBar.id = 'tabs';
+  var bodyDiv = document.createElement('div'); bodyDiv.id = 'body';
   document.body.appendChild(tabBar);
   document.body.appendChild(bodyDiv);
 
   var panes = {};
   var stickyBar;
 
-  ['tipboard', 'guests', 'offers'].forEach(function(id, i) {
-    var labels = ['Tip Board', 'Guests', 'Offers'];
+  ['tipboard', 'plan', 'offers'].forEach(function(id, i) {
+    var labels = ['Tip Board', 'Plan', 'Offers'];
     var b = document.createElement('button');
     b.className = 'tab' + (i === 0 ? ' on' : '');
     b.textContent = labels[i];
@@ -438,7 +367,6 @@
       if (stickyBar) stickyBar.className = id === 'tipboard' ? 'vis' : '';
     };
     tabBar.appendChild(b);
-
     var pane = document.createElement('div');
     pane.className = 'pane' + (i === 0 ? ' on' : '');
     pane.id = 'pane-' + id;
@@ -448,70 +376,103 @@
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
   function parkSelect(id, selectedIdx) {
-    var s = document.createElement('select');
-    s.id = id;
+    var s = document.createElement('select'); s.id = id;
     PARKS.forEach(function(p, i) {
       var o = document.createElement('option');
-      o.value = p[0];
-      o.textContent = p[1];
+      o.value = p[0]; o.textContent = p[1];
       if (i === (selectedIdx || 0)) o.selected = true;
       s.appendChild(o);
     });
     return s;
   }
-
   function lbl(txt, forId) {
-    var l = document.createElement('label');
-    l.textContent = txt;
+    var l = document.createElement('label'); l.textContent = txt;
     if (forId) l.htmlFor = forId;
     return l;
   }
-
   function inp(id, ph) {
-    var i = document.createElement('input');
-    i.id = id;
-    i.placeholder = ph || '';
-    return i;
+    var i = document.createElement('input'); i.id = id; i.placeholder = ph || ''; return i;
   }
-
   function mkbtn(txt, fn) {
-    var b = document.createElement('button');
-    b.className = 'btn';
-    b.textContent = txt;
-    b.onclick = fn;
-    return b;
+    var b = document.createElement('button'); b.className = 'btn'; b.textContent = txt; b.onclick = fn; return b;
   }
-
   function resDiv(id) {
-    var d = document.createElement('div');
-    d.className = 'res';
-    d.id = id;
-    d.style.display = 'none';
-    return d;
+    var d = document.createElement('div'); d.className = 'res'; d.id = id; d.style.display = 'none'; return d;
   }
-
   function showRes(id, r) {
     var el = document.getElementById(id);
     el.style.display = 'block';
     el.style.color = r.ok ? '#2ed573' : '#ff4757';
     el.textContent = '[' + r.status + ']\n' + (typeof r.data === 'string' ? r.data : JSON.stringify(r.data, null, 2));
   }
-
   function loading(id) {
     var el = document.getElementById(id);
-    el.style.display = 'block';
-    el.style.color = '#aaa';
-    el.textContent = 'Loading...';
+    el.style.display = 'block'; el.style.color = '#aaa'; el.textContent = 'Loading...';
   }
 
-  async function doLoadTipBoard() {
-    loading('tb-res');
-    await loadAttractionNames();
+  // Switch to offers tab and pre-fill + auto-generate offer for a ride
+  async function bookRide(expId, parkId) {
+    // Switch to offers tab
+    document.querySelectorAll('.tab')[2].click();
 
+    // Pre-fill fields
+    document.getElementById('off-exp').value = expId;
+    document.getElementById('off-park').value = parkId;
+
+    // Fetch guests for this specific ride and generate offer
+    loading('off-res');
+    var gids = await fetchGuestIds(expId, parkId);
+    if (!gids.length) {
+      showRes('off-res', { ok: false, status: 0, data: 'Could not fetch guests for this ride' });
+      return;
+    }
+    window._guestIds = gids;
+
+    var rawTime = document.getElementById('off-time').value.trim() || '08:00';
+    var tt = rawTime.length === 5 ? rawTime + ':00' : rawTime;
+
+    var r = await api('/ea-vas/planning/api/v1/experiences/offerset/generate', {
+      date: today,
+      parkId: parkId,
+      experienceIds: [expId],
+      guestIds: gids,
+      targetedTime: tt,
+      ignoredBookedExperienceIds: null
+    });
+    showRes('off-res', r);
+  }
+
+  // ── Tip Board ────────────────────────────────────────────────────────────────
+  var tb = panes.tipboard;
+  tb.appendChild(lbl('Park'));
+  tb.appendChild(parkSelect('tb-park'));
+
+  var tbRow = document.createElement('div'); tbRow.className = 'row';
+  var tbDateWrap = document.createElement('div');
+  tbDateWrap.appendChild(lbl('Date'));
+  var tbDate = inp('tb-date'); tbDate.type = 'date'; tbDate.value = today;
+  tbDateWrap.appendChild(tbDate); tbRow.appendChild(tbDateWrap);
+  tb.appendChild(tbRow);
+
+  var filterRow = document.createElement('label'); filterRow.className = 'filter-row';
+  var filterCb = document.createElement('input'); filterCb.type = 'checkbox'; filterCb.id = 'tb-ll-only';
+  var filterSpan = document.createElement('span'); filterSpan.textContent = 'Lightning Lane only';
+  filterRow.appendChild(filterCb); filterRow.appendChild(filterSpan);
+  tb.appendChild(filterRow);
+  tb.appendChild(resDiv('tb-res'));
+
+  async function doLoadTipBoard() {
+    // Save scroll position so we don't jump to top on refresh
+    var scrollY = window.scrollY;
+
+    await loadAttractionNames();
     var pk = document.getElementById('tb-park').value;
     var dt = document.getElementById('tb-date').value;
     var llOnly = document.getElementById('tb-ll-only').checked;
     var a = ga();
+
+    var el = document.getElementById('tb-res');
+    el.style.display = 'block'; el.style.color = '#aaa'; el.textContent = 'Loading...';
 
     if (!a) {
       showRes('tb-res', { ok: false, status: 0, data: 'Not logged in — press Login first' });
@@ -523,26 +484,13 @@
     try {
       var r = await fetch(url, {
         method: 'GET',
-        headers: {
-          'Accept': '*/*',
-          'Accept-Language': 'en-US',
-          'Authorization': 'BEARER ' + a.accessToken,
-          'x-user-id': a.swid,
-          'x-app-id': 'ANDROID'
-        },
-        referrer: '',
-        credentials: 'omit',
-        cache: 'no-store'
+        headers: { 'Accept': '*/*', 'Accept-Language': 'en-US', 'Authorization': 'BEARER ' + a.accessToken, 'x-user-id': a.swid, 'x-app-id': 'ANDROID' },
+        referrer: '', credentials: 'omit', cache: 'no-store'
       });
-
       var txt = await r.text();
-      var d;
-      try { d = JSON.parse(txt); } catch (e) { d = txt; }
+      var d; try { d = JSON.parse(txt); } catch(e) { d = txt; }
 
-      if (r.status !== 200) {
-        showRes('tb-res', { ok: false, status: r.status, data: d });
-        return;
-      }
+      if (r.status !== 200) { showRes('tb-res', { ok: false, status: r.status, data: d }); return; }
 
       var exps = d.availableExperiences || [];
       if (llOnly) {
@@ -551,59 +499,32 @@
         });
       }
 
-      var el = document.getElementById('tb-res');
-      el.style.display = 'block';
-      el.style.color = '#ddd';
-      el.textContent = '';
+      el.style.color = '#ddd'; el.textContent = '';
 
-      if (!exps.length) {
-        el.textContent = llOnly ? 'No LL times available right now.' : 'No experiences found.';
-        return;
-      }
+      if (!exps.length) { el.textContent = llOnly ? 'No LL times available right now.' : 'No experiences found.'; return; }
 
       exps.forEach(function(e) {
-        var div = document.createElement('div');
-        div.className = 'exp';
-
-        var name = document.createElement('div');
-        name.className = 'exp-name';
-        name.textContent = nm(e.id);
+        var div = document.createElement('div'); div.className = 'exp';
+        var name = document.createElement('div'); name.className = 'exp-name'; name.textContent = nm(e.id);
         div.appendChild(name);
 
-        var meta = document.createElement('div');
-        meta.className = 'exp-meta';
-
+        var meta = document.createElement('div'); meta.className = 'exp-meta';
         var sb = e.standby || {};
         if (sb.waitTime != null) {
-          var w = document.createElement('span');
-          w.className = 'wait';
-          w.textContent = sb.waitTime + 'm wait';
-          meta.appendChild(w);
+          var w = document.createElement('span'); w.className = 'wait'; w.textContent = sb.waitTime + 'm wait'; meta.appendChild(w);
         }
-
         if (e.flex && e.flex.available) {
-          var ll = document.createElement('span');
-          ll.className = 'll';
+          var ll = document.createElement('span'); ll.className = 'll';
           var t = e.flex.nextAvailableTime;
-          if (t) {
-            var pts = t.split(':');
-            var h = +pts[0];
-            var ampm = h >= 12 ? 'pm' : 'am';
-            h = h % 12 || 12;
-            ll.textContent = '⚡ ' + h + ':' + pts[1] + ampm;
-          } else {
-            ll.textContent = '⚡ avail';
-          }
+          if (t) { var pts = t.split(':'); var h = +pts[0]; var ampm = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; ll.textContent = '⚡ ' + h + ':' + pts[1] + ampm; }
+          else { ll.textContent = '⚡ avail'; }
           meta.appendChild(ll);
         }
-
         if (e.individual && e.individual.available) {
-          var ip = document.createElement('span');
-          ip.className = 'price';
+          var ip = document.createElement('span'); ip.className = 'price';
           ip.textContent = '💲 ' + (e.individual.nextAvailableTime || 'avail');
           meta.appendChild(ip);
         }
-
         div.appendChild(meta);
 
         if ((e.flex && e.flex.available) || (e.individual && e.individual.available)) {
@@ -611,119 +532,121 @@
           bb.style.cssText = 'margin-top:6px;padding:6px 12px;border-radius:4px;border:1px solid #00d4ff33;background:rgba(0,212,255,.1);color:#00d4ff;cursor:pointer;font-family:monospace;font-size:11px';
           bb.textContent = 'Book →';
           bb.onclick = (function(expId, parkId) {
-            return function() {
-              document.getElementById('off-exp').value = expId;
-              document.getElementById('off-park').value = parkId;
-              document.querySelectorAll('.tab')[2].click();
-            };
+            return function() { bookRide(expId, parkId); };
           })(e.id, pk);
           div.appendChild(bb);
+        }
+        el.appendChild(div);
+      });
+
+      // Restore scroll position after re-render
+      window.scrollTo(0, scrollY);
+
+    } catch(ex) { showRes('tb-res', { ok: false, status: 0, data: ex.message }); }
+  }
+
+  stickyBar = document.createElement('div'); stickyBar.id = 'tb-sticky'; stickyBar.className = 'vis';
+  stickyBar.appendChild(mkbtn('Load Tip Board', doLoadTipBoard));
+  document.body.appendChild(stickyBar);
+
+  // ── Plan ─────────────────────────────────────────────────────────────────────
+  var pl = panes.plan;
+  pl.appendChild(lbl('Date'));
+  var plDate = inp('pl-date'); plDate.type = 'date'; plDate.value = today;
+  pl.appendChild(plDate);
+  pl.appendChild(mkbtn('Load Plan', async function() {
+    loading('pl-res');
+    var a = ga();
+    if (!a) { showRes('pl-res', { ok: false, status: 0, data: 'Not logged in' }); return; }
+    var dt = document.getElementById('pl-date').value;
+    var swid = a.swid; // e.g. {50E35BA2-...}
+    var swidEnc = encodeURIComponent(swid);
+    var path = '/plan/wdw-itinerary-api/api/v1/itinerary-items/' + swidEnc +
+      '?item-types=FASTPASS&item-types=DINING&item-types=ACTIVITY&item-types=VIRTUAL_QUEUE_POSITION' +
+      '&destination=WDW&fields=items%2Cprofiles%2Cassets%2CloggedInGuestId' +
+      '&guest-locators=' + swidEnc + '%3Btype%3Dswid' +
+      '&guest-locator-groups=MY_FAMILY' +
+      '&start-date=' + dt +
+      '&show-friends=false';
+
+    var r = await apiGet(path);
+    var el = document.getElementById('pl-res');
+    el.style.display = 'block'; el.style.color = '#ddd'; el.textContent = '';
+
+    if (!r.ok) { showRes('pl-res', r); return; }
+
+    var items = r.data.items || [];
+    var profiles = r.data.profiles || {};
+    var assets = r.data.assets || {};
+
+    if (!items.length) { el.textContent = 'No items found for this date.'; return; }
+
+    // Group by type
+    var ll = items.filter(function(i) { return i.kind === 'LIGHTNING_LANE' || (i.type === 'FASTPASS' && i.kind !== 'PARK_PASS'); });
+    var passes = items.filter(function(i) { return i.kind === 'PARK_PASS'; });
+    var dining = items.filter(function(i) { return i.type === 'DINING'; });
+    var other = items.filter(function(i) { return ll.indexOf(i) === -1 && passes.indexOf(i) === -1 && dining.indexOf(i) === -1; });
+
+    function renderSection(label, arr) {
+      if (!arr.length) return;
+      var sec = document.createElement('div'); sec.className = 'sec'; sec.textContent = label + ' (' + arr.length + ')'; el.appendChild(sec);
+      arr.forEach(function(item) {
+        var div = document.createElement('div'); div.className = 'plan-item';
+
+        // Name from assets
+        var assetId = item.facility || (item.assets && item.assets[0] && item.assets[0].content) || '';
+        var assetName = (assets[assetId] && assets[assetId].name) || nm(assetId.split(';')[0]) || assetId;
+        var nameEl = document.createElement('div'); nameEl.className = 'plan-item-name'; nameEl.textContent = assetName;
+        div.appendChild(nameEl);
+
+        var meta = document.createElement('div'); meta.className = 'plan-item-meta';
+
+        // Date/time
+        var start = item.startDateTime || item.displayStartDate || '';
+        if (start) {
+          var dateSpan = document.createElement('span'); dateSpan.className = 'plan-date';
+          if (item.allDay) {
+            dateSpan.textContent = item.displayStartDate || start.split('T')[0];
+          } else {
+            try {
+              var d = new Date(start);
+              var hh = d.getHours(); var mm = String(d.getMinutes()).padStart(2,'0');
+              var ap = hh >= 12 ? 'pm' : 'am'; hh = hh % 12 || 12;
+              dateSpan.textContent = hh + ':' + mm + ap;
+            } catch(e) { dateSpan.textContent = start; }
+          }
+          meta.appendChild(dateSpan);
+        }
+
+        // Status
+        if (item.status) {
+          var statSpan = document.createElement('span'); statSpan.className = 'plan-park';
+          statSpan.textContent = item.status.toLowerCase().replace(/_/g,' ');
+          meta.appendChild(statSpan);
+        }
+
+        div.appendChild(meta);
+
+        // Guests
+        if (item.guests && item.guests.length) {
+          var guestNames = item.guests.map(function(g) {
+            var prof = profiles[g.id];
+            return prof ? prof.name.firstName : g.id.split(';')[0].slice(0,8);
+          }).join(', ');
+          var gEl = document.createElement('div'); gEl.className = 'plan-guests'; gEl.textContent = '👥 ' + guestNames;
+          div.appendChild(gEl);
         }
 
         el.appendChild(div);
       });
-    } catch (ex) {
-      showRes('tb-res', { ok: false, status: 0, data: ex.message });
-    }
-  }
-
-  // ── Tip Board ────────────────────────────────────────────────────────────────
-  var tb = panes.tipboard;
-  tb.appendChild(lbl('Park'));
-  tb.appendChild(parkSelect('tb-park'));
-
-  var tbRow = document.createElement('div');
-  tbRow.className = 'row';
-
-  var tbDateWrap = document.createElement('div');
-  tbDateWrap.appendChild(lbl('Date'));
-  var tbDate = inp('tb-date');
-  tbDate.type = 'date';
-  tbDate.value = today;
-  tbDateWrap.appendChild(tbDate);
-  tbRow.appendChild(tbDateWrap);
-  tb.appendChild(tbRow);
-
-  var filterRow = document.createElement('label');
-  filterRow.className = 'filter-row';
-  var filterCb = document.createElement('input');
-  filterCb.type = 'checkbox';
-  filterCb.id = 'tb-ll-only';
-  var filterSpan = document.createElement('span');
-  filterSpan.textContent = 'Lightning Lane only';
-  filterRow.appendChild(filterCb);
-  filterRow.appendChild(filterSpan);
-  tb.appendChild(filterRow);
-  tb.appendChild(resDiv('tb-res'));
-
-  stickyBar = document.createElement('div');
-  stickyBar.id = 'tb-sticky';
-  stickyBar.className = 'vis';
-  stickyBar.appendChild(mkbtn('Load Tip Board', doLoadTipBoard));
-  document.body.appendChild(stickyBar);
-
-  // ── Guests ───────────────────────────────────────────────────────────────────
-  var gu = panes.guests;
-  gu.appendChild(lbl('Park'));
-  gu.appendChild(parkSelect('gu-park'));
-  gu.appendChild(lbl('Facility ID (optional)'));
-  gu.appendChild(inp('gu-fid', 'e.g. 80010176'));
-  gu.appendChild(mkbtn('Fetch Guests', async function() {
-    loading('gu-res');
-    var r = await api('/ea-vas/planning/api/v1/experiences/guest/guests', {
-      date: today,
-      facilityId: document.getElementById('gu-fid').value.trim() || null,
-      parkId: document.getElementById('gu-park').value
-    });
-
-    var el = document.getElementById('gu-res');
-    el.style.display = 'block';
-    el.style.color = '#ddd';
-    el.textContent = '';
-
-    if (!r.ok) {
-      showRes('gu-res', r);
-      return;
     }
 
-    var g = r.data.guests || [];
-    var ig = r.data.ineligibleGuests || [];
-    window._guestIds = g.map(function(x) { return x.id; });
-
-    if (g.length) {
-      var s = document.createElement('div');
-      s.className = 'sec';
-      s.textContent = 'Eligible (' + g.length + ')';
-      el.appendChild(s);
-
-      g.forEach(function(guest) {
-        var d = document.createElement('div');
-        d.className = 'guest';
-        d.textContent = guest.firstName + ' ' + guest.lastName + (guest.primary ? ' ★' : '');
-        var gid = document.createElement('div');
-        gid.className = 'guest-id';
-        gid.textContent = guest.id;
-        d.appendChild(gid);
-        el.appendChild(d);
-      });
-    }
-
-    if (ig.length) {
-      var s2 = document.createElement('div');
-      s2.className = 'sec';
-      s2.textContent = 'Ineligible (' + ig.length + ')';
-      el.appendChild(s2);
-
-      ig.forEach(function(guest) {
-        var d = document.createElement('div');
-        d.className = 'guest inelig';
-        var reason = (guest.ineligibleReason && guest.ineligibleReason.ineligibleReason) || guest.ineligibleReason || '';
-        d.textContent = guest.firstName + ' ' + guest.lastName + (reason ? ' — ' + String(reason).replace(/_/g, ' ') : '');
-        el.appendChild(d);
-      });
-    }
+    renderSection('Park Passes', passes);
+    renderSection('Lightning Lane', ll);
+    renderSection('Dining', dining);
+    renderSection('Other', other);
   }));
-  gu.appendChild(resDiv('gu-res'));
+  pl.appendChild(resDiv('pl-res'));
 
   // ── Offers ───────────────────────────────────────────────────────────────────
   var of = panes.offers;
@@ -732,34 +655,28 @@
   of.appendChild(lbl('Park'));
   of.appendChild(parkSelect('off-park'));
   of.appendChild(lbl('Targeted Time'));
-  var offTime = inp('off-time');
-  offTime.type = 'time';
-  offTime.value = '08:00';
-  of.appendChild(offTime);
-  of.appendChild(lbl('Guest IDs (auto-filled from Guests tab)'));
-  of.appendChild(inp('off-guests', 'comma separated, or fetch guests first'));
+  var offTime = inp('off-time'); offTime.type = 'time'; offTime.value = '08:00'; of.appendChild(offTime);
+  of.appendChild(lbl('Guest IDs (auto-filled when booking from Tip Board)'));
+  of.appendChild(inp('off-guests', 'comma separated, or book from Tip Board'));
   of.appendChild(mkbtn('Generate Offer', async function() {
     loading('off-res');
-
     var expId = document.getElementById('off-exp').value.trim();
     var pk = document.getElementById('off-park').value;
     var rawTime = document.getElementById('off-time').value.trim() || '08:00';
     var tt = rawTime.length === 5 ? rawTime + ':00' : rawTime;
     var gids = document.getElementById('off-guests').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-
     if (!gids.length && window._guestIds && window._guestIds.length) gids = window._guestIds;
     if (!expId) { showRes('off-res', { ok: false, status: 0, data: 'Enter an experience ID' }); return; }
-    if (!gids.length) { showRes('off-res', { ok: false, status: 0, data: 'Fetch guests first or enter guest IDs' }); return; }
-
+    if (!gids.length) {
+      // Try fetching guests now
+      loading('off-res');
+      gids = await fetchGuestIds(expId, pk);
+      if (!gids.length) { showRes('off-res', { ok: false, status: 0, data: 'Could not fetch guests — try booking from Tip Board' }); return; }
+    }
     var r = await api('/ea-vas/planning/api/v1/experiences/offerset/generate', {
-      date: today,
-      parkId: pk,
-      experienceIds: [expId],
-      guestIds: gids,
-      targetedTime: tt,
-      ignoredBookedExperienceIds: null
+      date: today, parkId: pk, experienceIds: [expId],
+      guestIds: gids, targetedTime: tt, ignoredBookedExperienceIds: null
     });
-
     showRes('off-res', r);
   }));
   of.appendChild(resDiv('off-res'));
