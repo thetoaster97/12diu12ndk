@@ -1,5 +1,5 @@
 (function() {
-  // ── Auth ────────────────────────────────────────────────────────────────────
+  // ── Auth ─────────────────────────────────────────────────────────────────────
   var _auth = null;
   var _oneIdClient = null;
   var _oneIdClientId = '';
@@ -19,6 +19,21 @@
     return 'TPR-' + resortId + '-LBSDK.' + getOneIdOs();
   }
 
+  function setBadgeOk() {
+    var b = document.getElementById('auth-badge');
+    if (!b || !_auth) return;
+    var sw = String(_auth.swid || '').replace(/[{}]/g, '');
+    b.textContent = '✓ ' + sw.slice(0, 8) + '...';
+    b.className = 'badge ok';
+  }
+
+  function setBadgeErr(msg) {
+    var b = document.getElementById('auth-badge');
+    if (!b) return;
+    b.textContent = '✗ ' + msg;
+    b.className = 'badge no';
+  }
+
   function clearOneIdGuestData() {
     try {
       if (_oneIdClientId) {
@@ -29,7 +44,7 @@
 
   function setAuthFromToken(token) {
     if (!token || !token.access_token) {
-      throw new Error('Login failed or cancelled');
+      throw new Error('Login did not return access_token');
     }
 
     _auth = {
@@ -39,14 +54,7 @@
     };
 
     clearOneIdGuestData();
-
-    var b = document.getElementById('auth-badge');
-    if (b) {
-      var sw = String(_auth.swid || '').replace(/[{}]/g, '');
-      b.textContent = '✓ ' + sw.slice(0, 8) + '...';
-      b.className = 'badge ok';
-    }
-
+    setBadgeOk();
     return _auth;
   }
 
@@ -59,14 +67,14 @@
 
       var existing = document.getElementById(ONEID_SCRIPT_ID);
       if (existing) {
-        var tries = 0;
-        var wait = setInterval(function() {
-          tries++;
+        var triesExisting = 0;
+        var timerExisting = setInterval(function() {
+          triesExisting++;
           if (window.OneID) {
-            clearInterval(wait);
+            clearInterval(timerExisting);
             resolve(window.OneID);
-          } else if (tries > 150) {
-            clearInterval(wait);
+          } else if (triesExisting > 150) {
+            clearInterval(timerExisting);
             reject(new Error('Timed out waiting for OneID'));
           }
         }, 100);
@@ -78,13 +86,13 @@
       script.src = ONEID_SCRIPT_URL;
       script.onload = function() {
         var tries = 0;
-        var wait = setInterval(function() {
+        var timer = setInterval(function() {
           tries++;
           if (window.OneID) {
-            clearInterval(wait);
+            clearInterval(timer);
             resolve(window.OneID);
           } else if (tries > 150) {
-            clearInterval(wait);
+            clearInterval(timer);
             reject(new Error('Timed out waiting for OneID'));
           }
         }, 100);
@@ -96,7 +104,7 @@
     });
   }
 
-  function getOneIdApiShape(oneid) {
+  function oneIdShape(oneid) {
     if (!oneid) return 'missing';
     if (typeof oneid.get === 'function') return 'client';
     if (typeof oneid.launchLogin === 'function') return 'direct';
@@ -107,12 +115,10 @@
     if (_oneIdClient) return _oneIdClient;
 
     var oneid = await loadOneIdScript();
-    var shape = getOneIdApiShape(oneid);
-
     _oneIdClientId = getClientId(resortId);
 
-    if (shape !== 'client') {
-      throw new Error('OneID client API unavailable');
+    if (typeof oneid.get !== 'function') {
+      throw new Error('OneID.get unavailable');
     }
 
     var client = oneid.get({
@@ -135,21 +141,20 @@
       try {
         var resortId = 'WDW';
         var oneid = await loadOneIdScript();
-        var shape = getOneIdApiShape(oneid);
+        var shape = oneIdShape(oneid);
         _oneIdClientId = getClientId(resortId);
 
-        // ── bg1 source path ───────────────────────────────────────────────────
         if (shape === 'client') {
           var client = await getOneIdClient(resortId);
           var settled = false;
 
-          function finishOk(val) {
+          function doneOk(val) {
             if (settled) return;
             settled = true;
             resolve(val);
           }
 
-          function finishErr(err) {
+          function doneErr(err) {
             if (settled) return;
             settled = true;
             reject(err);
@@ -158,48 +163,39 @@
           function onLogin(data) {
             try {
               var token = data && data.token;
-              finishOk(setAuthFromToken(token));
+              doneOk(setAuthFromToken(token));
             } catch (e) {
-              finishErr(e);
+              doneErr(e);
             }
           }
 
-          function onClose() {
-            try {
-              client.launchLogin();
-            } catch (e) {}
-          }
-
           function onError(err) {
-            finishErr(new Error((err && err.message) || 'Login failed'));
+            doneErr(new Error((err && err.message) || 'Login failed'));
           }
 
           try {
             if (typeof client.off === 'function') {
               try { client.off('login', onLogin); } catch (e) {}
-              try { client.off('close', onClose); } catch (e) {}
               try { client.off('error', onError); } catch (e) {}
             }
           } catch (e) {}
 
           if (typeof client.on === 'function') {
             client.on('login', onLogin);
-            client.on('close', onClose);
             client.on('error', onError);
           }
 
+          // Important: no auto-reopen on close here.
           client.launchLogin();
           return;
         }
 
-        // ── fallback for runtime where OneID.get does not exist ──────────────
         if (shape === 'direct') {
           oneid.launchLogin(
             resortId,
-            function(arg1) {
+            function(result) {
               try {
-                // some runtimes pass { token }, some pass token directly
-                var token = (arg1 && arg1.token) ? arg1.token : arg1;
+                var token = (result && result.token) ? result.token : result;
                 resolve(setAuthFromToken(token));
               } catch (e) {
                 reject(e);
@@ -213,7 +209,7 @@
           return;
         }
 
-        reject(new Error('Unsupported OneID API shape'));
+        reject(new Error('Unsupported OneID runtime'));
       } catch (e) {
         reject(e);
       }
@@ -224,8 +220,9 @@
     return authReady() ? _auth : null;
   }
 
-  // ── API ─────────────────────────────────────────────────────────────────────
+  // ── API ──────────────────────────────────────────────────────────────────────
   var BASE = 'https://disneyworld.disney.go.com';
+  var today = new Date().toISOString().split('T')[0];
 
   async function api(path, body) {
     var a = ga();
@@ -271,8 +268,6 @@
       return { ok: false, status: 0, data: e.message };
     }
   }
-
-  var today = new Date().toISOString().split('T')[0];
 
   var PARKS = [
     ['80007944', 'Magic Kingdom'],
@@ -330,7 +325,7 @@
     return DYNAMIC_NAMES[numId] || NAMES[numId] || String(id);
   }
 
-  // ── Build page ──────────────────────────────────────────────────────────────
+  // ── Build page ───────────────────────────────────────────────────────────────
   document.open();
   document.write('<!DOCTYPE html><html><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>LL Tool</title></head><body></body></html>');
   document.close();
@@ -373,7 +368,7 @@
   ].join('');
   document.head.appendChild(st);
 
-  // ── Header ──────────────────────────────────────────────────────────────────
+  // ── Header ───────────────────────────────────────────────────────────────────
   var hd = document.createElement('div');
   hd.id = 'hd';
 
@@ -398,8 +393,7 @@
       loginBtn.textContent = 'Re-login';
       loginBtn.disabled = false;
     }).catch(function(e) {
-      authBadge.textContent = '✗ ' + ((e && e.message) || 'login failed');
-      authBadge.className = 'badge no';
+      setBadgeErr((e && e.message) || 'login failed');
       loginBtn.textContent = 'Login';
       loginBtn.disabled = false;
       console.error('OneID login error:', e);
@@ -420,7 +414,7 @@
     namesBadge.className = 'badge ' + (count > 0 ? 'ok' : 'no');
   });
 
-  // ── Tabs ────────────────────────────────────────────────────────────────────
+  // ── Tabs ─────────────────────────────────────────────────────────────────────
   var tabBar = document.createElement('div');
   tabBar.id = 'tabs';
   var bodyDiv = document.createElement('div');
@@ -431,14 +425,14 @@
   var panes = {};
   var stickyBar;
 
-  ['tipboard','guests','offers'].forEach(function(id, i) {
-    var labels = ['Tip Board','Guests','Offers'];
+  ['tipboard', 'guests', 'offers'].forEach(function(id, i) {
+    var labels = ['Tip Board', 'Guests', 'Offers'];
     var b = document.createElement('button');
     b.className = 'tab' + (i === 0 ? ' on' : '');
     b.textContent = labels[i];
     b.onclick = function() {
-      document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('on'); });
-      document.querySelectorAll('.pane').forEach(function(p){ p.classList.remove('on'); });
+      document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('on'); });
+      document.querySelectorAll('.pane').forEach(function(p) { p.classList.remove('on'); });
       b.classList.add('on');
       panes[id].classList.add('on');
       if (stickyBar) stickyBar.className = id === 'tipboard' ? 'vis' : '';
@@ -452,7 +446,7 @@
     bodyDiv.appendChild(pane);
   });
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────────
   function parkSelect(id, selectedIdx) {
     var s = document.createElement('select');
     s.id = id;
@@ -520,7 +514,7 @@
     var a = ga();
 
     if (!a) {
-      showRes('tb-res', { ok:false, status:0, data:'Not logged in — press Login first' });
+      showRes('tb-res', { ok: false, status: 0, data: 'Not logged in — press Login first' });
       return;
     }
 
@@ -546,7 +540,7 @@
       try { d = JSON.parse(txt); } catch (e) { d = txt; }
 
       if (r.status !== 200) {
-        showRes('tb-res', { ok:false, status:r.status, data:d });
+        showRes('tb-res', { ok: false, status: r.status, data: d });
         return;
       }
 
@@ -629,11 +623,11 @@
         el.appendChild(div);
       });
     } catch (ex) {
-      showRes('tb-res', { ok:false, status:0, data:ex.message });
+      showRes('tb-res', { ok: false, status: 0, data: ex.message });
     }
   }
 
-  // ── Tip Board ───────────────────────────────────────────────────────────────
+  // ── Tip Board ────────────────────────────────────────────────────────────────
   var tb = panes.tipboard;
   tb.appendChild(lbl('Park'));
   tb.appendChild(parkSelect('tb-park'));
@@ -668,7 +662,7 @@
   stickyBar.appendChild(mkbtn('Load Tip Board', doLoadTipBoard));
   document.body.appendChild(stickyBar);
 
-  // ── Guests ──────────────────────────────────────────────────────────────────
+  // ── Guests ───────────────────────────────────────────────────────────────────
   var gu = panes.guests;
   gu.appendChild(lbl('Park'));
   gu.appendChild(parkSelect('gu-park'));
@@ -694,7 +688,7 @@
 
     var g = r.data.guests || [];
     var ig = r.data.ineligibleGuests || [];
-    window._guestIds = g.map(function(x){ return x.id; });
+    window._guestIds = g.map(function(x) { return x.id; });
 
     if (g.length) {
       var s = document.createElement('div');
@@ -724,14 +718,14 @@
         var d = document.createElement('div');
         d.className = 'guest inelig';
         var reason = (guest.ineligibleReason && guest.ineligibleReason.ineligibleReason) || guest.ineligibleReason || '';
-        d.textContent = guest.firstName + ' ' + guest.lastName + (reason ? ' — ' + String(reason).replace(/_/g,' ') : '');
+        d.textContent = guest.firstName + ' ' + guest.lastName + (reason ? ' — ' + String(reason).replace(/_/g, ' ') : '');
         el.appendChild(d);
       });
     }
   }));
   gu.appendChild(resDiv('gu-res'));
 
-  // ── Offers ──────────────────────────────────────────────────────────────────
+  // ── Offers ───────────────────────────────────────────────────────────────────
   var of = panes.offers;
   of.appendChild(lbl('Experience ID'));
   of.appendChild(inp('off-exp', 'e.g. 80010176'));
@@ -751,11 +745,11 @@
     var pk = document.getElementById('off-park').value;
     var rawTime = document.getElementById('off-time').value.trim() || '08:00';
     var tt = rawTime.length === 5 ? rawTime + ':00' : rawTime;
-    var gids = document.getElementById('off-guests').value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+    var gids = document.getElementById('off-guests').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
 
     if (!gids.length && window._guestIds && window._guestIds.length) gids = window._guestIds;
-    if (!expId) { showRes('off-res', { ok:false, status:0, data:'Enter an experience ID' }); return; }
-    if (!gids.length) { showRes('off-res', { ok:false, status:0, data:'Fetch guests first or enter guest IDs' }); return; }
+    if (!expId) { showRes('off-res', { ok: false, status: 0, data: 'Enter an experience ID' }); return; }
+    if (!gids.length) { showRes('off-res', { ok: false, status: 0, data: 'Fetch guests first or enter guest IDs' }); return; }
 
     var r = await api('/ea-vas/planning/api/v1/experiences/offerset/generate', {
       date: today,
